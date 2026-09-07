@@ -62,6 +62,7 @@ use App\Http\Controllers\Api\Academic\PeriodController;
 use App\Http\Controllers\Api\Academic\AssignmentController;
 use App\Http\Controllers\Api\Academic\ReportCardController;
 use App\Http\Controllers\Api\System\AuditLogController;
+use App\Http\Controllers\Api\System\BackupLogController;
 use App\Http\Controllers\Api\System\SettingController;
 use App\Http\Controllers\Api\Students\StudentParentController;
 use App\Http\Controllers\Api\Students\GuardianController;
@@ -638,6 +639,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::get('/audit-logs', [AuditLogController::class, 'index']);
         Route::get('/audit-logs/{audit_log}', [AuditLogController::class, 'show']);
+    });
+
+
+    // =========================
+    // BACKUP LOGS (read-only, khusus admin)
+    // =========================
+    Route::middleware('role:Admin,Administrator')->group(function () {
+        Route::get('/backup-logs', [BackupLogController::class, 'index']);
+        Route::get('/backup-logs/{backup_log}', [BackupLogController::class, 'show']);
     });
 
 
