@@ -110,6 +110,9 @@ Route::post('/login', [AuthController::class, 'login']);
 // PUBLIC PPDB REGISTRATION (CodeIgniter form submit) — no auth
 Route::post('/ppdb/register', [PublicRegistrationController::class, 'store']);
 
+// PUBLIC SETTINGS (unauthenticated)
+Route::get('/public-settings', [SettingController::class, 'public']);
+
 Route::middleware('auth:sanctum')->group(function () {
 
     // =========================
@@ -648,6 +651,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/settings/{setting}', [SettingController::class, 'update']);
         Route::patch('/settings/{setting}', [SettingController::class, 'update']);
         Route::delete('/settings/{setting}', [SettingController::class, 'destroy']);
+        Route::post('/settings/upload', [SettingController::class, 'upload']);
     });
 
 
