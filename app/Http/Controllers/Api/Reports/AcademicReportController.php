@@ -15,6 +15,8 @@ class AcademicReportController extends Controller
             'subject_id' => 'nullable|integer',
             'semester' => 'nullable|string|in:1,2',
             'academic_year' => 'nullable|string',
+            'semester_id' => 'nullable|integer',
+            'academic_year_id' => 'nullable|integer',
             'per_page' => 'nullable|integer|min:1|max:100',
         ]);
 
@@ -32,11 +34,15 @@ class AcademicReportController extends Controller
             $query->where('grades.subject_id', $validated['subject_id']);
         }
 
-        if (!empty($validated['semester'])) {
+        if (!empty($validated['semester_id'])) {
+            $query->where('grades.semester_id', $validated['semester_id']);
+        } elseif (!empty($validated['semester'])) {
             $query->where('grades.semester', $validated['semester']);
         }
 
-        if (!empty($validated['academic_year'])) {
+        if (!empty($validated['academic_year_id'])) {
+            $query->where('grades.academic_year_id', $validated['academic_year_id']);
+        } elseif (!empty($validated['academic_year'])) {
             $query->where('grades.academic_year', $validated['academic_year']);
         }
 

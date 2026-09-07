@@ -6,6 +6,7 @@ use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassStudent;
 use App\Models\Academic\Grade;
 use App\Models\Academic\SchoolClass;
+use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
 use App\Models\Staff\Teacher;
 use App\Models\Staff\TeacherAssignment;
@@ -147,6 +148,8 @@ class TeacherGradeDataScopeTest extends TestCase
             $t->decimal('score', 5, 2)->nullable();
             $t->string('semester');
             $t->string('academic_year');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
             $t->timestamps();
         });
     }
@@ -158,6 +161,7 @@ class TeacherGradeDataScopeTest extends TestCase
         $roleAdmin = Role::create(['name' => 'Admin']);
 
         $year = AcademicYear::create(['name' => '2025/2026', 'is_active' => true]);
+        $semester = Semester::create(['academic_year_id' => $year->id, 'name' => '1']);
         $math = Subject::create(['code' => 'MTK', 'name' => 'Matematika']);
         $indo = Subject::create(['code' => 'BIN', 'name' => 'Bahasa Indonesia']);
 
@@ -184,7 +188,7 @@ class TeacherGradeDataScopeTest extends TestCase
         ClassStudent::create(['class_id' => $classB->id, 'student_id' => $studentB1->id, 'academic_year_id' => $year->id]);
 
         // Grade: Andi Matematika 85 (milik Guru A).
-        Grade::create(['student_id' => $studentA1->id, 'subject_id' => $math->id, 'class_id' => $classA->id, 'type' => 'uts', 'score' => 85, 'semester' => '1', 'academic_year' => '2025/2026']);
+        Grade::create(['student_id' => $studentA1->id, 'subject_id' => $math->id, 'class_id' => $classA->id, 'type' => 'uts', 'score' => 85, 'semester' => '1', 'academic_year' => '2025/2026', 'academic_year_id' => $year->id, 'semester_id' => $semester->id]);
 
         $this->guruA = $guruA;
         $this->guruB = $guruB;

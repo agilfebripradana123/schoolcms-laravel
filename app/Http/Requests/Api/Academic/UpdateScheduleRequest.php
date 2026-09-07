@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\Academic;
 
+use App\Models\Academic\Schedule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -55,7 +56,15 @@ class UpdateScheduleRequest extends FormRequest
             'semester_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('semesters', 'id'),
+                Rule::exists('semesters', 'id')->where(function ($query) {
+                    $academicYearId = $this->input('academic_year_id');
+
+                    if (empty($academicYearId)) {
+                        $academicYearId = Schedule::find((int) $this->route('schedule'))?->academic_year_id;
+                    }
+
+                    $query->where('academic_year_id', $academicYearId);
+                }),
             ],
         ];
     }

@@ -18,6 +18,8 @@ class Grade extends Model
         'score',
         'semester',
         'academic_year',
+        'semester_id',
+        'academic_year_id',
     ];
 
     protected function casts(): array
@@ -42,5 +44,15 @@ class Grade extends Model
     public function schoolClass(): BelongsTo
     {
         return $this->belongsTo(SchoolClass::class, 'class_id');
+    }
+
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function semester(): BelongsTo
+    {
+        return $this->belongsTo(Semester::class, 'semester_id');
     }
 }

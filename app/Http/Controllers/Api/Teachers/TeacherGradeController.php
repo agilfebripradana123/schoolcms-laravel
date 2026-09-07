@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassStudent;
 use App\Models\Academic\Grade;
+use App\Models\Academic\Semester;
 use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -63,6 +64,44 @@ class TeacherGradeController extends Controller
     }
 
     /**
+     * Resolve semester_id dari input (id atau nama '1'/'2' dalam tahun terpilih).
+     * Memberlakukan pair-consistency: semester harus milik academic_year yang
+     * sama, dan id/string yang bertentangan ditolak.
+     *
+     * @return array{semester_id:int, name:string}|array{error:string}
+     */
+    private function resolveSemester(array $input, AcademicYear $year): array
+    {
+        if (!empty($input['semester_id'])) {
+            $semester = Semester::find((int) $input['semester_id']);
+
+            if (!$semester) {
+                return ['error' => 'Semester not found'];
+            }
+
+            if ($semester->academic_year_id !== $year->id) {
+                return ['error' => 'The selected semester does not belong to the selected academic year.'];
+            }
+
+            if (!empty($input['semester']) && $semester->name !== $input['semester']) {
+                return ['error' => 'The semester value conflicts with semester_id.'];
+            }
+
+            return ['semester_id' => $semester->id, 'name' => $semester->name];
+        }
+
+        $semester = Semester::where('academic_year_id', $year->id)
+            ->where('name', $input['semester'])
+            ->first();
+
+        if (!$semester) {
+            return ['error' => 'The selected semester does not exist for the selected academic year.'];
+        }
+
+        return ['semester_id' => $semester->id, 'name' => $semester->name];
+    }
+
+    /**
      * GET /api/teacher/grades?class_id&subject_id&type&semester&academic_year...
      * Roster siswa aktif di kelas + nilai komponen (type) utk scope guru.
      */
@@ -79,6 +118,7 @@ class TeacherGradeController extends Controller
             'subject_id' => ['required', 'integer'],
             'type' => ['required', Rule::in(['tugas', 'uts', 'uas'])],
             'semester' => ['required', Rule::in(['1', '2'])],
+            'semester_id' => ['nullable', 'integer'],
             'academic_year' => ['nullable', 'string'],
             'academic_year_id' => ['nullable', 'integer'],
         ]);
@@ -95,13 +135,18 @@ class TeacherGradeController extends Controller
             return response()->json(['success' => false, 'message' => 'Academic year not found', 'data' => null], 404);
         }
 
+        $semesterInfo = $this->resolveSemester($validated, $year);
+
+        if (isset($semesterInfo['error'])) {
+            return response()->json(['success' => false, 'message' => $semesterInfo['error'], 'data' => null], 422);
+        }
+
         if (!TeacherAssignment::where($scope)->exists()) {
             return response()->json(['success' => false, 'message' => 'Scope not found', 'data' => null], 404);
         }
 
         $classId = $scope['class_id'];
         $type = $validated['type'];
-        $semester = $validated['semester'];
 
         $enrollments = ClassStudent::where('class_id', $classId)
             ->where('status', 'active')
@@ -114,8 +159,8 @@ class TeacherGradeController extends Controller
         $grades = Grade::where('class_id', $classId)
             ->where('subject_id', $scope['subject_id'])
             ->where('type', $type)
-            ->where('semester', $semester)
-            ->where('academic_year', $yearName)
+            ->where('semester_id', $semesterInfo['semester_id'])
+            ->where('academic_year_id', $year->id)
             ->whereIn('student_id', $studentIds)
             ->get()
             ->keyBy('student_id');
@@ -141,7 +186,7 @@ class TeacherGradeController extends Controller
                 'class_id' => $classId,
                 'subject_id' => $scope['subject_id'],
                 'type' => $type,
-                'semester' => $semester,
+                'semester' => $validated['semester'],
                 'academic_year' => $yearName,
                 'students' => $students,
             ],
@@ -166,6 +211,7 @@ class TeacherGradeController extends Controller
             'subject_id' => ['required', 'integer'],
             'type' => ['required', Rule::in(['tugas', 'uts', 'uas'])],
             'semester' => ['required', Rule::in(['1', '2'])],
+            'semester_id' => ['nullable', 'integer'],
             'academic_year' => ['nullable', 'string'],
             'academic_year_id' => ['nullable', 'integer'],
             'items' => ['required', 'array', 'max:200'],
@@ -185,6 +231,12 @@ class TeacherGradeController extends Controller
             return response()->json(['success' => false, 'message' => 'Academic year not found', 'data' => null], 404);
         }
 
+        $semesterInfo = $this->resolveSemester($validated, $year);
+
+        if (isset($semesterInfo['error'])) {
+            return response()->json(['success' => false, 'message' => $semesterInfo['error'], 'data' => null], 422);
+        }
+
         if (!TeacherAssignment::where($scope)->exists()) {
             return response()->json(['success' => false, 'message' => 'Scope not found', 'data' => null], 404);
         }
@@ -192,7 +244,6 @@ class TeacherGradeController extends Controller
         $classId = $scope['class_id'];
         $subjectId = $scope['subject_id'];
         $type = $validated['type'];
-        $semester = $validated['semester'];
 
         $allowedStudentIds = ClassStudent::where('class_id', $classId)
             ->where('status', 'active')
@@ -201,7 +252,7 @@ class TeacherGradeController extends Controller
 
         $allowedSet = array_flip($allowedStudentIds);
 
-        DB::transaction(function () use ($validated, $classId, $subjectId, $type, $semester, $yearName, $allowedSet) {
+        DB::transaction(function () use ($validated, $classId, $subjectId, $type, $semesterInfo, $year, $yearName, $allowedSet) {
             foreach ($validated['items'] as $item) {
                 $studentId = (int) $item['student_id'];
 
@@ -215,11 +266,13 @@ class TeacherGradeController extends Controller
                         'subject_id' => $subjectId,
                         'class_id' => $classId,
                         'type' => $type,
-                        'semester' => $semester,
-                        'academic_year' => $yearName,
+                        'semester_id' => $semesterInfo['semester_id'],
+                        'academic_year_id' => $year->id,
                     ],
                     [
                         'score' => $item['score'],
+                        'semester' => $semesterInfo['name'],
+                        'academic_year' => $yearName,
                     ]
                 );
             }

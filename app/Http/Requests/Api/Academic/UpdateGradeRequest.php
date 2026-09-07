@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\Academic;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
 use App\Models\Students\Student;
+use App\Services\Academic\GradePeriodResolver;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -12,6 +13,9 @@ use Illuminate\Validation\Rule;
 
 class UpdateGradeRequest extends FormRequest
 {
+    /** @var array{academic_year_id:int, semester_id:int, academic_year:string, semester:string}|null */
+    private ?array $period = null;
+
     public function authorize(): bool
     {
         return true;
@@ -22,44 +26,47 @@ class UpdateGradeRequest extends FormRequest
         return [
             'student_id' => [
                 'sometimes',
-                'required',
                 'integer',
                 Rule::exists('students', 'id')->whereNull('deleted_at'),
             ],
             'subject_id' => [
                 'sometimes',
-                'required',
                 'integer',
                 Rule::exists('subjects', 'id')->whereNull('deleted_at'),
             ],
             'class_id' => [
                 'sometimes',
-                'required',
                 'integer',
                 Rule::exists('classes', 'id')->whereNull('deleted_at'),
             ],
             'type' => [
                 'sometimes',
-                'required',
                 'string',
                 Rule::in(['tugas', 'uts', 'uas']),
             ],
             'score' => [
                 'sometimes',
-                'required',
                 'numeric',
                 'min:0',
                 'max:100',
             ],
+            'semester_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('semesters', 'id'),
+            ],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')->whereNull('deleted_at'),
+            ],
             'semester' => [
-                'sometimes',
-                'required',
+                'nullable',
                 'string',
                 Rule::in(['1', '2']),
             ],
             'academic_year' => [
-                'sometimes',
-                'required',
+                'nullable',
                 'string',
                 'regex:/^\d{4}\/\d{4}$/',
             ],
@@ -81,12 +88,15 @@ class UpdateGradeRequest extends FormRequest
                 return;
             }
 
+            $this->resolvePeriodIfPresent($validator);
+
             $studentId = $this->input('student_id') ?? $existingGrade->student_id;
             $subjectId = $this->input('subject_id') ?? $existingGrade->subject_id;
             $classId = $this->input('class_id') ?? $existingGrade->class_id;
             $type = $this->input('type') ?? $existingGrade->type;
-            $semester = $this->input('semester') ?? $existingGrade->semester;
-            $academicYear = $this->input('academic_year') ?? $existingGrade->academic_year;
+
+            $semesterId = $this->period['semester_id'] ?? $existingGrade->semester_id;
+            $academicYearId = $this->period['academic_year_id'] ?? $existingGrade->academic_year_id;
 
             $student = Student::where('id', $studentId)->whereNull('deleted_at')->first();
 
@@ -118,8 +128,8 @@ class UpdateGradeRequest extends FormRequest
                 ->where('subject_id', $subjectId)
                 ->where('class_id', $classId)
                 ->where('type', $type)
-                ->where('semester', $semester)
-                ->where('academic_year', $academicYear)
+                ->where('semester_id', $semesterId)
+                ->where('academic_year_id', $academicYearId)
                 ->where('id', '!=', $gradeId)
                 ->exists();
 
@@ -127,6 +137,43 @@ class UpdateGradeRequest extends FormRequest
                 $validator->errors()->add('student_id', 'A grade for this student, subject, class, type, semester, and academic year already exists.');
             }
         });
+    }
+
+    /**
+     * The canonical period resolved from the payload, or null when no period
+     * field was supplied (the period is then left untouched).
+     *
+     * @return array{academic_year_id:int, semester_id:int, academic_year:string, semester:string}|null
+     */
+    public function period(): ?array
+    {
+        return $this->period;
+    }
+
+    private function resolvePeriodIfPresent($validator): void
+    {
+        $hasPeriodInput = collect(['semester_id', 'academic_year_id', 'semester', 'academic_year'])
+            ->contains(fn ($key) => $this->filled($key));
+
+        if (!$hasPeriodInput) {
+            return;
+        }
+
+        $resolver = GradePeriodResolver::from($this->input());
+        $period = $resolver->resolve();
+        $errors = $resolver->errors();
+
+        if (!empty($errors)) {
+            foreach ($errors as $field => $messages) {
+                foreach ($messages as $message) {
+                    $validator->errors()->add($field, $message);
+                }
+            }
+
+            return;
+        }
+
+        $this->period = $period;
     }
 
     protected function failedValidation(Validator $validator): void

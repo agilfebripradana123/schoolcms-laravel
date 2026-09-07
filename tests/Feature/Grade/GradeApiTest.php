@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Grade;
 
+use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
-use App\Models\System\Role;
 use App\Models\Academic\SchoolClass;
-use App\Models\Students\Student;
+use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
+use App\Models\Students\Student;
+use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -172,7 +174,17 @@ class GradeApiTest extends TestCase
             'academic_year' => '2026/2027',
         ];
 
-        return Grade::create(array_merge($defaults, $overrides));
+        $grade = array_merge($defaults, $overrides);
+
+        $year = AcademicYear::where('name', $grade['academic_year'])->whereNull('deleted_at')->first();
+        $semester = Semester::where('academic_year_id', $year->id)
+            ->where('name', $grade['semester'])
+            ->first();
+
+        $grade['academic_year_id'] = $year->id;
+        $grade['semester_id'] = $semester->id;
+
+        return Grade::create($grade);
     }
 
     // ─── Cleanup Helpers ───────────────────────────────────────
@@ -948,7 +960,7 @@ class GradeApiTest extends TestCase
     public function test_store_allows_same_student_different_semester(): void
     {
         $this->authenticateAsAdmin();
-        $this->createTestGrade(['semester' => '1']);
+        $this->createTestGrade(['semester' => '1', 'academic_year' => '2025/2026']);
 
         $response = $this->postJson('/api/grades', [
             'student_id' => $this->studentId,
@@ -957,7 +969,7 @@ class GradeApiTest extends TestCase
             'type' => 'tugas',
             'score' => 90,
             'semester' => '2',
-            'academic_year' => '2026/2027',
+            'academic_year' => '2025/2026',
         ]);
         $response->assertStatus(201);
     }
@@ -1238,5 +1250,269 @@ class GradeApiTest extends TestCase
         foreach ($response->json('data') as $item) {
             $this->assertArrayNotHasKey('password', $item['student'] ?? []);
         }
+    }
+
+    // ─── Grade Period Normalization Tests (Wave 1) ────────────
+
+    private function resolvePeriod(string $yearName, string $semesterName): array
+    {
+        $year = AcademicYear::where('name', $yearName)->whereNull('deleted_at')->firstOrFail();
+        $semester = Semester::where('academic_year_id', $year->id)->where('name', $semesterName)->firstOrFail();
+
+        return [
+            'academic_year_id' => $year->id,
+            'semester_id' => $semester->id,
+            'academic_year' => $year->name,
+            'semester' => $semester->name,
+        ];
+    }
+
+    public function test_store_accepts_canonical_ids_period(): void
+    {
+        $this->authenticateAsAdmin();
+        $period = $this->resolvePeriod('2025/2026', '1');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'uts',
+            'score' => 88,
+            'academic_year_id' => $period['academic_year_id'],
+            'semester_id' => $period['semester_id'],
+        ]);
+
+        $response->assertStatus(201);
+        $data = $response->json('data');
+        $this->assertEquals($period['academic_year_id'], $data['academic_year_id']);
+        $this->assertEquals($period['semester_id'], $data['semester_id']);
+        $this->assertEquals('2025/2026', $data['academic_year']);
+        $this->assertEquals('1', $data['semester']);
+    }
+
+    public function test_store_dual_writes_aliases_from_ids(): void
+    {
+        $this->authenticateAsAdmin();
+        $period = $this->resolvePeriod('2025/2026', '2');
+
+        $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 77,
+            'academic_year_id' => $period['academic_year_id'],
+            'semester_id' => $period['semester_id'],
+        ])->assertStatus(201);
+
+        $row = DB::table('grades')
+            ->where('student_id', $this->studentId)
+            ->where('semester_id', $period['semester_id'])
+            ->where('academic_year_id', $period['academic_year_id'])
+            ->first();
+
+        $this->assertEquals('2025/2026', $row->academic_year);
+        $this->assertEquals('2', $row->semester);
+    }
+
+    public function test_store_rejects_semester_from_another_academic_year(): void
+    {
+        $this->authenticateAsAdmin();
+        $year2025 = $this->resolvePeriod('2025/2026', '1');
+        $foreignSemester = $this->resolvePeriod('2024/2025', '1');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'academic_year_id' => $year2025['academic_year_id'],
+            'semester_id' => $foreignSemester['semester_id'],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['semester_id']);
+    }
+
+    public function test_store_rejects_nonexistent_semester_id(): void
+    {
+        $this->authenticateAsAdmin();
+        $year2025 = $this->resolvePeriod('2025/2026', '1');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'academic_year_id' => $year2025['academic_year_id'],
+            'semester_id' => 999999,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['semester_id']);
+    }
+
+    public function test_store_rejects_nonexistent_academic_year_id(): void
+    {
+        $this->authenticateAsAdmin();
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'academic_year_id' => 999999,
+            'semester_id' => 103,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['academic_year_id']);
+    }
+
+    public function test_store_accepts_ids_with_matching_legacy_strings(): void
+    {
+        $this->authenticateAsAdmin();
+        $period = $this->resolvePeriod('2025/2026', '2');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'uas',
+            'score' => 90,
+            'academic_year_id' => $period['academic_year_id'],
+            'semester_id' => $period['semester_id'],
+            'academic_year' => '2025/2026',
+            'semester' => '2',
+        ]);
+
+        $response->assertStatus(201);
+    }
+
+    public function test_store_rejects_contradictory_academic_year_string(): void
+    {
+        $this->authenticateAsAdmin();
+        $year2025 = $this->resolvePeriod('2025/2026', '1');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'academic_year_id' => $year2025['academic_year_id'],
+            'semester_id' => $year2025['semester_id'],
+            'academic_year' => '2026/2027',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['academic_year']);
+    }
+
+    public function test_store_rejects_contradictory_semester_string(): void
+    {
+        $this->authenticateAsAdmin();
+        $period = $this->resolvePeriod('2025/2026', '1');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'academic_year_id' => $period['academic_year_id'],
+            'semester_id' => $period['semester_id'],
+            'semester' => '2',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['semester']);
+    }
+
+    public function test_store_rejects_duplicate_grade_by_ids(): void
+    {
+        $this->authenticateAsAdmin();
+        $this->createTestGrade(['type' => 'uts']);
+        $duplicate = $this->resolvePeriod('2026/2027', '1');
+
+        $response = $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'uts',
+            'score' => 95,
+            'academic_year_id' => $duplicate['academic_year_id'],
+            'semester_id' => $duplicate['semester_id'],
+        ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_index_filters_by_semester_id_and_academic_year_id(): void
+    {
+        $this->authenticate();
+        $this->createTestGrade(['type' => 'tugas', 'semester' => '1', 'academic_year' => '2025/2026']);
+        $period = $this->resolvePeriod('2025/2026', '1');
+
+        $response = $this->getJson('/api/grades?' . http_build_query([
+            'semester_id' => $period['semester_id'],
+            'academic_year_id' => $period['academic_year_id'],
+        ]));
+
+        $response->assertStatus(200);
+        $this->assertNotEmpty($response->json('data'));
+        foreach ($response->json('data') as $item) {
+            $this->assertEquals($period['semester_id'], $item['semester_id']);
+            $this->assertEquals($period['academic_year_id'], $item['academic_year_id']);
+        }
+    }
+
+    public function test_index_rejects_contradictory_semester_filters(): void
+    {
+        $this->authenticate();
+        $period = $this->resolvePeriod('2025/2026', '1');
+
+        $this->getJson('/api/grades?' . http_build_query([
+            'semester_id' => $period['semester_id'],
+            'semester' => '2',
+        ]))->assertStatus(422);
+    }
+
+    public function test_update_period_via_ids_and_keeps_aliases_synced(): void
+    {
+        $this->authenticateAsAdmin();
+        $grade = $this->createTestGrade();
+        $target = $this->resolvePeriod('2025/2026', '2');
+
+        $response = $this->putJson("/api/grades/{$grade->id}", [
+            'academic_year_id' => $target['academic_year_id'],
+            'semester_id' => $target['semester_id'],
+        ]);
+
+        $response->assertStatus(200);
+        $grade->refresh();
+        $this->assertEquals($target['academic_year_id'], $grade->academic_year_id);
+        $this->assertEquals($target['semester_id'], $grade->semester_id);
+        $this->assertEquals('2025/2026', $grade->academic_year);
+        $this->assertEquals('2', $grade->semester);
+    }
+
+    public function test_update_rejects_contradictory_period(): void
+    {
+        $this->authenticateAsAdmin();
+        $grade = $this->createTestGrade();
+        $period = $this->resolvePeriod('2025/2026', '1');
+
+        $response = $this->putJson("/api/grades/{$grade->id}", [
+            'academic_year_id' => $period['academic_year_id'],
+            'semester_id' => $period['semester_id'],
+            'semester' => '2',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['semester']);
     }
 }

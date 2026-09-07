@@ -14,6 +14,24 @@ class StoreReportCardRequest extends FormRequest
         return true;
     }
 
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if ($validator->errors()->any()) {
+                return;
+            }
+
+            $academicYearId = $this->input('academic_year_id');
+            $semesterId = $this->input('semester_id');
+
+            $semester = \App\Models\Academic\Semester::find($semesterId);
+
+            if ($semester && (int) $semester->academic_year_id !== (int) $academicYearId) {
+                $validator->errors()->add('semester_id', 'The selected semester does not belong to the selected academic year.');
+            }
+        });
+    }
+
     public function rules(): array
     {
         return [

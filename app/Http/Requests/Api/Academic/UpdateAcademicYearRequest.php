@@ -29,11 +29,13 @@ class UpdateAcademicYearRequest extends FormRequest
                 'sometimes',
                 'nullable',
                 'date',
+                'before_or_equal:end_date',
             ],
             'end_date' => [
                 'sometimes',
                 'nullable',
                 'date',
+                'after_or_equal:start_date',
             ],
             'is_active' => [
                 'sometimes',
