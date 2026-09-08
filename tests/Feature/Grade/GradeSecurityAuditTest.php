@@ -2,10 +2,12 @@
 
 namespace Tests\Feature\Grade;
 
+use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
 use App\Models\System\Role;
 use App\Models\Academic\SchoolClass;
+use App\Models\Academic\Semester;
 use App\Models\Students\Student;
 use App\Models\Academic\Subject;
 use App\Models\System\User;
@@ -145,7 +147,17 @@ class GradeSecurityAuditTest extends TestCase
             'academic_year' => '2026/2027',
         ];
 
-        return Grade::create(array_merge($defaults, $overrides));
+        $grade = array_merge($defaults, $overrides);
+
+        $year = AcademicYear::where('name', $grade['academic_year'])->whereNull('deleted_at')->first();
+        $semester = Semester::where('academic_year_id', $year->id)
+            ->where('name', $grade['semester'])
+            ->first();
+
+        $grade['academic_year_id'] = $year->id;
+        $grade['semester_id'] = $semester->id;
+
+        return Grade::create($grade);
     }
 
     // ─── Cleanup Helpers ───────────────────────────────────────

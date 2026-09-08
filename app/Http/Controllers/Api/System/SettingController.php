@@ -13,6 +13,34 @@ use Illuminate\Support\Facades\Crypt;
 
 class SettingController extends Controller
 {
+    /**
+     * Public settings for unauthenticated surfaces (login page, etc).
+     * Only returns rows flagged is_public; secrets are never exposed.
+     */
+    public function public(): JsonResponse
+    {
+        $settings = Setting::query()
+            ->where('is_public', true)
+            ->where('is_encrypted', false)
+            ->orderBy('group')
+            ->orderBy('sort_order')
+            ->get();
+
+        $data = [];
+        foreach ($settings as $setting) {
+            if ($setting->type === 'password') {
+                continue;
+            }
+            $data[$setting->key] = $setting->value;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Public settings retrieved successfully',
+            'data' => $data,
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = Setting::query();
@@ -121,6 +149,27 @@ class SettingController extends Controller
             'success' => true,
             'message' => 'Setting updated successfully',
             'data' => new SettingResource($setting->fresh()),
+        ]);
+    }
+
+    public function upload(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'image', 'max:5120', 'mimes:jpg,jpeg,png,webp,gif'],
+            'key' => ['nullable', 'string', 'max:100', 'regex:/^[a-z0-9_]+$/'],
+        ]);
+
+        $file = $request->file('file');
+        $path = $file->store('settings', 'public');
+        $url = \Illuminate\Support\Facades\Storage::disk('public')->url($path);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'File uploaded successfully',
+            'data' => [
+                'path' => $path,
+                'url' => $url,
+            ],
         ]);
     }
 

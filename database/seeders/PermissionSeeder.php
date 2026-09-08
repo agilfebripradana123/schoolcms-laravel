@@ -27,6 +27,21 @@ class PermissionSeeder extends Seeder
             ['name' => 'manage-schedules', 'description' => 'Mengelola jadwal pelajaran.'],
             ['name' => 'manage-grades', 'description' => 'Mengelola data penilaian, tugas, periode, dan rapor.'],
 
+            // Teacher portal — read-only (default untuk role Guru).
+            ['name' => 'view-classes', 'description' => 'Melihat kelas yang menjadi scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-students', 'description' => 'Melihat siswa pada kelas yang menjadi scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-schedules', 'description' => 'Melihat jadwal mengajar milik guru (Portal Guru).'],
+            ['name' => 'view-attendance', 'description' => 'Melihat kehadiran siswa pada kelas scope mengajar guru (Portal Guru).'],
+            ['name' => 'manage-attendance', 'description' => 'Menginput/mengubah kehadiran siswa pada kelas scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-grades', 'description' => 'Melihat nilai siswa pada kelas scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-assignments', 'description' => 'Melihat tugas pada kelas scope mengajar guru (Portal Guru).'],
+            ['name' => 'manage-assignments', 'description' => 'Mengelola tugas pada kelas scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-exams', 'description' => 'Melihat ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-exam-schedules', 'description' => 'Melihat jadwal ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-exam-results', 'description' => 'Melihat hasil ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
+            ['name' => 'view-exam-monitoring', 'description' => 'Melihat monitoring peserta ujian dan security events pada mata pelajaran scope mengajar guru (Portal Guru).'],
+
+
             // Staff
             ['name' => 'manage-teachers', 'description' => 'Mengelola data guru, penugasan, kehadiran, cuti, dan dokumen.'],
             ['name' => 'manage-staff', 'description' => 'Mengelola tenaga kependidikan.'],

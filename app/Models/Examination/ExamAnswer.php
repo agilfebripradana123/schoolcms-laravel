@@ -16,6 +16,7 @@ class ExamAnswer extends Model
         'essay_answer',
         'is_correct',
         'answered_at',
+        'exam_attempt_id',
     ];
 
     protected function casts(): array
@@ -31,6 +32,11 @@ class ExamAnswer extends Model
     public function participant(): BelongsTo
     {
         return $this->belongsTo(ExamParticipant::class, 'participant_id');
+    }
+
+    public function attempt(): BelongsTo
+    {
+        return $this->belongsTo(ExamAttempt::class, 'exam_attempt_id');
     }
 
     public function question(): BelongsTo

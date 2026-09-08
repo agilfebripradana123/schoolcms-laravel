@@ -1,59 +1,150 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# SchoolCMS Laravel
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Sistem Informasi Manajemen Sekolah (SIMS) berbasis REST API. Backend untuk manajemen akademik, kesiswaan, kepegawaian, keuangan, ujian online (CBT), PPDB, fasilitas, dan administrasi surat-menyurat. Migrasi dari CodeIgniter 4 ke Laravel 12. Frontend SPA terpisah: **[schoolcms-react](https://github.com/agilfebripradana123/schoolcms-react)** (React + TS + Vite + Tailwind).
 
-## About Laravel
+## Tech Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- **Backend:** Laravel 12, PHP ≥8.2 (repo ini)
+- **Frontend:** [schoolcms-react](https://github.com/agilfebripradana123/schoolcms-react) — React + TypeScript + Vite + Tailwind CSS (repo terpisah)
+- **Auth:** Laravel Sanctum (Bearer token)
+- **Database:** MySQL 8.4 (production/legacy), SQLite (dev)
+- **Export/Import:** maatwebsite/excel 4.0
+- **Frontend Assets:** Vite 7, Tailwind CSS v4
+- **Testing:** PHPUnit 11.5
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Fitur
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### Akademik
+- Tahun ajaran, semester, kurikulum
+- Kelas, mata pelajaran, jadwal, periode
+- Penugasan guru, rapor
 
-## Learning Laravel
+### Kesiswaan
+- CRUD siswa, kehadiran, mutasi, alumni
+- Orang tua/wali, riwayat, kartu pelajar
+- Prestasi, pelanggaran, bimbingan konseling, ekstrakurikuler
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+### Kepegawaian
+- Data guru & staff, penugasan
+- Kehadiran, cuti, dokumen
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Ujian Online (CBT)
+- Bank soal, sesi ujian, jadwal, instruksi
+- Peserta, jawaban, hasil, monitoring
+- Exam attempts (secure web exam)
 
-## Laravel Sponsors
+### Keuangan
+- Jenis biaya, tagihan, pembayaran, transaksi
+- Beasiswa, laporan keuangan
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### PPDB (Penerimaan Peserta Didik Baru)
+- Pendaftaran publik (tanpa auth)
+- Verifikasi, seleksi, daftar ulang
+- Export Dapodik
 
-### Premium Partners
+### Fasilitas & Inventaris
+- Ruangan, aset, pemeliharaan
+- Inventaris, stock movement (masuk/keluar/adjustment)
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+### Komunikasi
+- Pengumuman, notifikasi, kalender akademik
 
-## Contributing
+### Administrasi
+- Surat masuk/keluar, disposisi, dokumen administrasi
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### Laporan
+- Akademik, siswa, guru, keuangan, kehadiran, inventaris
 
-## Code of Conduct
+### Portal Self-Service
+- **Siswa:** nilai, jadwal, kehadiran, tugas, keuangan, ujian online
+- **Guru:** kelas sendiri, absensi siswa, input nilai, tugas, monitoring ujian
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### Sistem
+- RBAC (roles/permissions), user management
+- Audit logs, settings, profile
 
-## Security Vulnerabilities
+## Cara Menjalankan
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### Prasyarat
+- PHP ≥8.2 + Composer
+- Node.js + npm
+- MySQL 8.4 atau SQLite
 
-## License
+### Setup Otomatis
+```bash
+composer setup
+```
+Menjalankan: `composer install` → copy `.env` → `key:generate` → `migrate` → `npm install` → `npm run build`.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### Development
+```bash
+composer dev
+```
+Menjalankan concurrently: server, queue worker, pail (log tailing), Vite dev server.
+
+### Testing
+```bash
+composer test
+```
+
+### Setup Manual
+```bash
+cp .env.example .env
+# Edit DB credentials di .env
+php artisan key:generate
+php artisan migrate
+npm install && npm run build
+php artisan serve
+```
+
+## Struktur Project
+
+```
+app/
+├── Exports/              # Excel exports (Teachers, Dapodik)
+├── Http/
+│   ├── Controllers/Api/  # 99 controllers, 15 domain modules
+│   │   ├── Academic/     # Tahun ajaran, kelas, kurikulum, jadwal, rapor
+│   │   ├── Administration/ # Surat masuk/keluar, disposisi
+│   │   ├── Communication/  # Pengumuman, notifikasi, kalender
+│   │   ├── Development/    # Prestasi, pelanggaran, BK, ekskul
+│   │   ├── Examination/    # CBT: bank soal, sesi, jadwal, monitoring
+│   │   ├── Facilities/     # Ruangan, aset, inventaris
+│   │   ├── Finance/        # Biaya, tagihan, pembayaran, beasiswa
+│   │   ├── PPDB/           # Pendaftaran, verifikasi, seleksi
+│   │   ├── Reports/        # Laporan agregasi
+│   │   ├── Staff/          # Guru, staff, kehadiran, cuti
+│   │   ├── Students/       # Siswa, portal self-service
+│   │   ├── System/         # Auth, roles, users, settings, audit
+│   │   └── Teachers/       # Portal guru
+│   ├── Middleware/        # RoleMiddleware, PermissionMiddleware
+│   └── Resources/         # API resources per domain
+├── Models/                # Eloquent models (Facilities, Staff, Students)
+database/migrations/       # 41 migration files
+docs/                      # teacher-api.md, permissions.md
+routes/api.php             # 60+ API endpoints, Sanctum auth
+```
+
+## Kontribusi
+
+### Legacy Database
+- **Jangan jalankan `php artisan migrate` di production.** Schema changes via direct SQL + DBA approval.
+- Database legacy dari CodeIgniter 4 (`schoolcms_db`).
+
+### Roles & Permissions
+- **Roles:** Admin, Administrator (write), Guru, Siswa (read-only)
+- **Permissions:** System-defined catalog, bukan CRUD dinamis. Lihat `docs/permissions.md`.
+
+### API Convention
+- Semua endpoint JSON: `{ success, message, data, meta }`
+- Auth: Sanctum Bearer token
+- Rate limiting aktif di PPDB endpoints
+
+### Development Workflow
+1. Branch dari `main`
+2. Follow existing controller/resource pattern per domain
+3. Tambah migration hanya untuk dev/staging
+4. Test: `composer test`
+5. PR dengan deskripsi perubahan + screenshot jika UI-related
+
+</content>

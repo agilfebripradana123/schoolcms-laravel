@@ -17,6 +17,28 @@ class User extends Authenticatable
 {
     use HasApiTokens, Notifiable, SoftDeletes, HasFactory;
 
+    /**
+     * Default read capabilities granted to every user with the `Guru` role.
+     * These are the core Portal Guru modules (Kelas & Siswa); additional
+     * optional modules (e.g. Sarpras) are still granted per-user via
+     * permission_user.
+     */
+    public const GURU_DEFAULT_PERMISSIONS = [
+        'view-classes',
+        'view-students',
+        'view-schedules',
+        'view-attendance',
+        'manage-attendance',
+        'view-grades',
+        'manage-grades',
+        'view-assignments',
+        'manage-assignments',
+        'view-exams',
+        'view-exam-schedules',
+        'view-exam-results',
+        'view-exam-monitoring',
+    ];
+
     protected $table = 'users';
 
     protected $fillable = [

@@ -50,7 +50,7 @@ class UserController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $user = User::with('role', 'permissions')->find($id);
+        $user = User::with('role.permissions', 'permissions')->find($id);
 
         if (!$user) {
             return response()->json([
@@ -127,7 +127,7 @@ class UserController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Permissions synced successfully',
-            'data' => new UserResource($user->fresh(['role', 'permissions'])),
+            'data' => new UserResource($user->fresh(['role.permissions', 'permissions'])),
         ]);
     }
 

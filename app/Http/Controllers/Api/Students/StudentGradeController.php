@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Api\Students;
 
 use App\Http\Controllers\Controller;
+use App\Models\Academic\AcademicYear;
 use App\Models\Academic\Grade;
+use App\Models\Academic\Semester;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Student Portal — Grades (read-only, identity scoped).
@@ -22,12 +25,16 @@ class StudentGradeController extends Controller
         $validated = $request->validate([
             'semester' => 'nullable|string|in:1,2',
             'academic_year' => 'nullable|string',
+            'semester_id' => 'nullable|integer',
+            'academic_year_id' => 'nullable|integer',
         ]);
+
+        [$academicYear, $semester] = $this->periodFilters($validated);
 
         $grades = Grade::with(['subject', 'schoolClass'])
             ->where('student_id', $student->id)
-            ->when(!empty($validated['semester']), fn ($q) => $q->where('semester', $validated['semester']))
-            ->when(!empty($validated['academic_year']), fn ($q) => $q->where('academic_year', $validated['academic_year']))
+            ->when($academicYear !== null, fn ($query) => $query->where($academicYear[0], $academicYear[1]))
+            ->when($semester !== null, fn ($query) => $query->where($semester[0], $semester[1]))
             ->orderBy('subject_id')
             ->get();
 
@@ -75,11 +82,15 @@ class StudentGradeController extends Controller
         $validated = $request->validate([
             'semester' => 'nullable|string|in:1,2',
             'academic_year' => 'nullable|string',
+            'semester_id' => 'nullable|integer',
+            'academic_year_id' => 'nullable|integer',
         ]);
 
+        [$academicYear, $semester] = $this->periodFilters($validated);
+
         $grades = Grade::where('student_id', $student->id)
-            ->when(!empty($validated['semester']), fn ($q) => $q->where('semester', $validated['semester']))
-            ->when(!empty($validated['academic_year']), fn ($q) => $q->where('academic_year', $validated['academic_year']))
+            ->when($academicYear !== null, fn ($query) => $query->where($academicYear[0], $academicYear[1]))
+            ->when($semester !== null, fn ($query) => $query->where($semester[0], $semester[1]))
             ->get();
 
         // Group by subject to compute per-subject final scores
@@ -106,5 +117,52 @@ class StudentGradeController extends Controller
                 'total_subjects' => $totalSubjects,
             ],
         ]);
+    }
+
+    /**
+     * Resolve canonical period filters. IDs take precedence; legacy strings are
+     * translated to the alias columns; contradictory id/string combos are rejected.
+     *
+     * @return array{0: ?array{0: string, 1: mixed}, 1: ?array{0: string, 1: mixed}}
+     */
+    private function periodFilters(array $validated): array
+    {
+        if (!empty($validated['academic_year_id']) && !empty($validated['academic_year'])) {
+            $name = AcademicYear::where('id', $validated['academic_year_id'])->value('name');
+
+            if ($name !== null && $name !== $validated['academic_year']) {
+                throw ValidationException::withMessages([
+                    'academic_year' => ['The academic_year value conflicts with academic_year_id.'],
+                ]);
+            }
+        }
+
+        if (!empty($validated['semester_id']) && !empty($validated['semester'])) {
+            $name = Semester::where('id', $validated['semester_id'])->value('name');
+
+            if ($name !== null && $name !== $validated['semester']) {
+                throw ValidationException::withMessages([
+                    'semester' => ['The semester value conflicts with semester_id.'],
+                ]);
+            }
+        }
+
+        if (!empty($validated['academic_year_id'])) {
+            $academicYear = ['academic_year_id', $validated['academic_year_id']];
+        } elseif (!empty($validated['academic_year'])) {
+            $academicYear = ['academic_year', $validated['academic_year']];
+        } else {
+            $academicYear = null;
+        }
+
+        if (!empty($validated['semester_id'])) {
+            $semester = ['semester_id', $validated['semester_id']];
+        } elseif (!empty($validated['semester'])) {
+            $semester = ['semester', $validated['semester']];
+        } else {
+            $semester = null;
+        }
+
+        return [$academicYear, $semester];
     }
 }

@@ -261,6 +261,55 @@ class ScheduleApiTest extends TestCase
         $response->assertJsonValidationErrors(['academic_year_id']);
     }
 
+    public function test_store_rejects_semester_from_another_academic_year(): void
+    {
+        $this->authenticateAsAdmin();
+
+        $foreignSemester = Semester::where('academic_year_id', '!=', $this->academicYearId)
+            ->orderBy('id')
+            ->first();
+
+        $this->assertNotNull($foreignSemester, 'No semester from another academic year exists in the seed data.');
+
+        $response = $this->postJson('/api/schedules', [
+            'class_id' => $this->classId,
+            'subject_id' => $this->subjectId,
+            'teacher_id' => $this->teacherId,
+            'day' => 'kamis',
+            'period_id' => $this->periodId,
+            'academic_year_id' => $this->academicYearId,
+            'semester_id' => $foreignSemester->id,
+        ]);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['semester_id']);
+    }
+
+    public function test_store_accepts_semester_from_same_academic_year(): void
+    {
+        $this->authenticateAsAdmin();
+
+        $sameYearSemester = Semester::where('academic_year_id', $this->academicYearId)
+            ->orderBy('id')
+            ->first();
+
+        $this->assertNotNull($sameYearSemester, 'No semester for the selected academic year exists in the seed data.');
+
+        $response = $this->postJson('/api/schedules', [
+            'class_id' => $this->classId,
+            'subject_id' => $this->subjectId,
+            'teacher_id' => $this->teacherId,
+            'day' => 'kamis',
+            'period_id' => $this->periodId,
+            'academic_year_id' => $this->academicYearId,
+            'semester_id' => $sameYearSemester->id,
+        ]);
+        $response->assertStatus(201);
+        $response->assertJson([
+            'success' => true,
+            'message' => 'Schedule created successfully',
+        ]);
+    }
+
     // ─── Update Tests ──────────────────────────────────────────
 
     public function test_update_changes_schedule(): void

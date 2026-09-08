@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'student' => \App\Http\Middleware\EnsureStudentProfile::class,
+            'permission' => \App\Http\Middleware\PermissionMiddleware::class,
         ]);
 
         // API-only app: tanpa redirect ke route 'login' (tidak ada),

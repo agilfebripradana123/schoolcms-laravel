@@ -11,6 +11,17 @@ use Illuminate\Support\Facades\Hash;
 
 class ProfileController extends Controller
 {
+    public function show(\Illuminate\Http\Request $request): \Illuminate\Http\JsonResponse
+    {
+        $user = $request->user()->load(['role.permissions', 'permissions']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profil berhasil dimuat.',
+            'data' => $this->userResponse($user),
+        ]);
+    }
+
     /**
      * Update the authenticated user's own profile.
      * The target is always the authenticated user — never a client-supplied id.
@@ -35,6 +46,22 @@ class ProfileController extends Controller
      * Change the authenticated user's own password.
      * Never returns a password and never logs it.
      */
+    public function updatePhoto(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $request->validate(['photo' => 'required|image|max:2048|mimes:jpg,jpeg,png,webp']);
+        $user = $request->user();
+        if ($user->photo) \Illuminate\Support\Facades\Storage::disk('public')->delete($user->photo);
+        $path = $request->file('photo')->store('users/photos', 'public');
+        $user->update(['photo' => $path]);
+        $user->load(['role.permissions', 'permissions']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Foto profil berhasil diperbarui.',
+            'data' => $this->userResponse($user),
+        ]);
+    }
+
     public function updatePassword(UpdatePasswordRequest $request): JsonResponse
     {
         $user = $request->user();
@@ -73,7 +100,8 @@ class ProfileController extends Controller
             'name' => $user->name,
             'username' => $user->username,
             'email' => $user->email,
-            'photo' => $user->photo,
+            'photo' => $user->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($user->photo) : null,
+            'photo_path' => $user->photo,
             'is_active' => $user->is_active,
             'role' => $user->role?->name,
             'permissions' => $effective,

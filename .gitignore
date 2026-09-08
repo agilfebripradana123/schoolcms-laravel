@@ -8,11 +8,9 @@
 
 # PHP / Laravel
 /vendor
-/storage/*.key
 /storage/pail
 /public/build
 /public/hot
-/public/storage
 /.phpunit.cache
 .phpunit.result.cache
 
@@ -47,3 +45,5 @@ Homestead.yaml
 schoolcms_db.sql
 schoolcms_db baru.sql
 graphify-out/
+
+.opencode

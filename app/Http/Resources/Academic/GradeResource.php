@@ -19,6 +19,8 @@ class GradeResource extends JsonResource
             'score' => $this->score,
             'semester' => $this->semester,
             'academic_year' => $this->academic_year,
+            'semester_id' => $this->semester_id,
+            'academic_year_id' => $this->academic_year_id,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
             'student' => new StudentResource($this->whenLoaded('student')),
