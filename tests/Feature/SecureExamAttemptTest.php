@@ -176,6 +176,15 @@ class SecureExamAttemptTest extends TestCase
             $t->timestamps();
             $t->softDeletes();
         });
+        Schema::create('exam_questions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_id');
+            $t->unsignedBigInteger('question_id');
+            $t->unsignedBigInteger('blueprint_item_id')->nullable();
+            $t->unsignedInteger('position')->default(0);
+            $t->unsignedInteger('points')->default(1);
+            $t->timestamps();
+        });
         Schema::create('exam_schedules', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_id');

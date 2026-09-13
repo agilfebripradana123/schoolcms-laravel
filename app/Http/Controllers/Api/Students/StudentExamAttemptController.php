@@ -8,6 +8,7 @@ use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptEvent;
 use App\Models\Examination\ExamParticipant;
+use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\ExamResult;
 use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
@@ -182,14 +183,15 @@ class StudentExamAttemptController extends Controller
 
         $order = $attempt->question_order ?? [];
         $questions = QuestionBank::whereIn('id', $order)->get()->keyBy('id');
+        $weightMap = $this->compositionWeightMap($attempt->exam);
 
-        $data = array_map(function ($questionId) use ($questions, $attempt) {
+        $data = array_map(function ($questionId) use ($questions, $attempt, $weightMap) {
             /** @var QuestionBank|null $q */
             $q = $questions->get($questionId);
             if (!$q) {
                 return null;
             }
-            return $this->questionPayload($q, $attempt);
+            return $this->questionPayload($q, $attempt, $weightMap);
         }, $order);
 
         $data = array_values(array_filter($data));
@@ -390,6 +392,25 @@ class StudentExamAttemptController extends Controller
 
     private function buildQuestionOrder(Exam $exam): array
     {
+        // Phase 2D: explicit composition is the source of truth when present.
+        $composed = ExamQuestion::where('exam_id', $exam->id)
+            ->orderBy('position')
+            ->orderBy('id')
+            ->pluck('question_id')
+            ->all();
+
+        if (! empty($composed)) {
+            if ($exam->shuffle_questions) {
+                shuffle($composed);
+            }
+
+            return array_values($composed);
+        }
+
+        // Legacy fallback (exams created before Phase 2D have no ExamQuestion
+        // rows): derive the set from the subject bank, sliced by total_questions.
+        // Kept temporarily for backward compatibility; new exams must be composed
+        // explicitly.
         $base = QuestionBank::where('subject_id', $exam->subject_id)
             ->orderBy('id')
             ->pluck('id')
@@ -405,6 +426,21 @@ class StudentExamAttemptController extends Controller
         }
 
         return array_values($base);
+    }
+
+    /**
+     * Per-question composition weight (exam_questions.points) keyed by
+     * question id. Empty for legacy exams -> callers fall back to the live
+     * question bank points. Phase 2D wires this into delivery + scoring so the
+     * exam's explicit per-question weight is the effective one for composed
+     * exams (single scoring system, no second weight source).
+     */
+    private function compositionWeightMap(Exam $exam): array
+    {
+        return ExamQuestion::where('exam_id', $exam->id)
+            ->pluck('points', 'question_id')
+            ->map(fn ($points) => (int) $points)
+            ->all();
     }
 
     private function buildOptionOrder(Exam $exam, array $questionIds): array
@@ -433,6 +469,7 @@ class StudentExamAttemptController extends Controller
     {
         $order = $attempt->question_order ?? [];
         $questions = QuestionBank::whereIn('id', $order)->get()->keyBy('id');
+        $weightMap = $this->compositionWeightMap($attempt->exam);
 
         $answers = ExamAnswer::where('exam_attempt_id', $attempt->id)->get()->keyBy('question_id');
 
@@ -446,12 +483,13 @@ class StudentExamAttemptController extends Controller
             if (!$question) {
                 continue;
             }
-            $maxPoints += (int) $question->points;
+            $points = $weightMap[$questionId] ?? (int) $question->points;
+            $maxPoints += $points;
             $answer = $answers->get($questionId);
             if ($answer) {
                 if ($answer->is_correct === true) {
                     $correctCount++;
-                    $score += (int) $question->points;
+                    $score += $points;
                 } elseif ($answer->is_correct === false) {
                     $wrongCount++;
                 }
@@ -496,7 +534,7 @@ class StudentExamAttemptController extends Controller
         return 'E';
     }
 
-    private function questionPayload(QuestionBank $question, ExamAttempt $attempt): array
+    private function questionPayload(QuestionBank $question, ExamAttempt $attempt, array $weightMap = []): array
     {
         $optionMap = $attempt->option_order ?? [];
         $orderedIds = $optionMap[(string) $question->id] ?? $question->options->pluck('id')->all();
@@ -522,7 +560,7 @@ class StudentExamAttemptController extends Controller
             'question_image' => $question->question_image,
             'type' => $question->type,
             'difficulty' => $question->difficulty,
-            'points' => (int) $question->points,
+            'points' => $weightMap[(string) $question->id] ?? (int) $question->points,
             'options' => $options,
         ];
     }

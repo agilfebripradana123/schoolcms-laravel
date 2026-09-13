@@ -67,4 +67,9 @@ class QuestionBank extends Model
     {
         return $this->hasMany(QuestionOption::class, 'question_id');
     }
+
+    public function examCompositions(): HasMany
+    {
+        return $this->hasMany(ExamQuestion::class, 'question_id');
+    }
 }

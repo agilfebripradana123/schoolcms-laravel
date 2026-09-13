@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\System\ProfileController;
 
 
 use App\Http\Controllers\Api\Examination\ExamController;
+use App\Http\Controllers\Api\Examination\ExamQuestionController;
 use App\Http\Controllers\Api\Examination\ExamSessionController;
 use App\Http\Controllers\Api\Examination\ExamScheduleController;
 use App\Http\Controllers\Api\Examination\ExamInstructionController;
@@ -348,6 +349,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/exams/{exam}', [ExamController::class, 'update']);
         Route::patch('/exams/{exam}', [ExamController::class, 'update']);
         Route::delete('/exams/{exam}', [ExamController::class, 'destroy']);
+    });
+
+    // =========================
+    // EXAM COMPOSITION (Phase 2D)
+    // explicit selected+ordered question set per exam
+    // =========================
+    // NOTE: `/questions/reorder` is registered BEFORE `/questions/{exam_question}`
+    // so the literal segment is not captured by the route parameter.
+    Route::get('/exams/{exam}/questions', [ExamQuestionController::class, 'index'])->middleware('permission:manage-exams');
+
+    Route::middleware('role:Admin,Administrator')->group(function () {
+        Route::post('/exams/{exam}/questions', [ExamQuestionController::class, 'store']);
+        Route::put('/exams/{exam}/questions/reorder', [ExamQuestionController::class, 'reorder']);
+        Route::patch('/exams/{exam}/questions/{exam_question}', [ExamQuestionController::class, 'update']);
+        Route::delete('/exams/{exam}/questions/{exam_question}', [ExamQuestionController::class, 'destroy']);
     });
 
 
