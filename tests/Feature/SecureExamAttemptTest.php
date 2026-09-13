@@ -234,6 +234,8 @@ class SecureExamAttemptTest extends TestCase
         Schema::create('exam_results', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('participant_id');
+            $t->unsignedBigInteger('exam_attempt_id')->nullable();
+            $t->decimal('percentage', 5, 2)->nullable();
             $t->decimal('total_score', 10, 2)->default(0);
             $t->unsignedInteger('correct_count')->default(0);
             $t->unsignedInteger('wrong_count')->default(0);
@@ -282,6 +284,11 @@ class SecureExamAttemptTest extends TestCase
             $t->unsignedBigInteger('selected_attempt_option_id')->nullable();
             $t->text('essay_answer')->nullable();
             $t->boolean('is_correct')->nullable();
+            $t->decimal('score', 10, 2)->nullable();
+            $t->string('grade_status', 20)->nullable();
+            $t->unsignedBigInteger('graded_by')->nullable();
+            $t->dateTime('graded_at')->nullable();
+            $t->text('feedback')->nullable();
             $t->dateTime('answered_at');
             $t->timestamps();
             $t->unique(['exam_attempt_id', 'question_id'], 'uq_exam_answers_attempt_question');

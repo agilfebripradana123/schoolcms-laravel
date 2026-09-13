@@ -19,6 +19,11 @@ class ExamAnswer extends Model
         'exam_attempt_id',
         'attempt_question_id',
         'selected_attempt_option_id',
+        'score',
+        'feedback',
+        'grade_status',
+        'graded_by',
+        'graded_at',
     ];
 
     protected function casts(): array
@@ -26,6 +31,9 @@ class ExamAnswer extends Model
         return [
             'is_correct' => 'boolean',
             'answered_at' => 'datetime',
+            'score' => 'decimal:2',
+            'graded_by' => 'integer',
+            'graded_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

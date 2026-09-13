@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\Teachers\TeacherAssignmentController as TeacherAssi
 use App\Http\Controllers\Api\Teachers\TeacherExamController;
 use App\Http\Controllers\Api\Teachers\TeacherExamScheduleController;
 use App\Http\Controllers\Api\Teachers\TeacherExamResultController;
+use App\Http\Controllers\Api\Teachers\TeacherExamGradingController;
 use App\Http\Controllers\Api\Teachers\TeacherExamMonitoringController;
 use App\Http\Controllers\Api\Students\Finance\StudentFinanceSummaryController;
 use App\Http\Controllers\Api\Students\Finance\StudentPaymentController;
@@ -1175,5 +1176,9 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:view-exam-monitoring');
         Route::get('/exam-monitoring/{attempt}', [TeacherExamMonitoringController::class, 'show'])
             ->middleware('permission:view-exam-monitoring');
+        Route::get('/exam-grading/attempts/{attempt}', [TeacherExamGradingController::class, 'show'])
+            ->middleware('permission:view-exam-results');
+        Route::put('/exam-grading/answers/{examAnswer}', [TeacherExamGradingController::class, 'grade'])
+            ->middleware('permission:view-exam-results');
     });
 });

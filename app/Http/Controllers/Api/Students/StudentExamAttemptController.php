@@ -11,7 +11,6 @@ use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamAttemptQuestionOption;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamQuestion;
-use App\Models\Examination\ExamResult;
 use App\Models\Examination\ExamSchedule;
 use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
@@ -350,7 +349,7 @@ class StudentExamAttemptController extends Controller
                 $participant->save();
             }
 
-            $result = $this->computeAndStoreResult($attempt);
+            $result = app(\App\Services\Examination\ExamScoringService::class)->scoreAttempt($attempt);
 
             return $this->ok('Attempt submitted.', [
                 'attempt' => $this->attemptPayload($attempt, $now),
@@ -576,72 +575,6 @@ class StudentExamAttemptController extends Controller
         }
 
         return $map;
-    }
-
-    private function computeAndStoreResult(ExamAttempt $attempt): ?array
-    {
-        // Phase 2G: scoring reads the immutable attempt snapshot.
-        $attemptQuestions = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
-            ->orderBy('position')
-            ->pluck('points', 'id')
-            ->all();
-
-        $answers = ExamAnswer::where('exam_attempt_id', $attempt->id)->get()->keyBy('attempt_question_id');
-
-        $correctCount = 0;
-        $wrongCount = 0;
-        $score = 0;
-        $maxPoints = 0;
-
-        foreach ($attemptQuestions as $attemptQuestionId => $points) {
-            $maxPoints += (int) $points;
-            $answer = $answers->get($attemptQuestionId);
-            if ($answer) {
-                if ($answer->is_correct === true) {
-                    $correctCount++;
-                    $score += (int) $points;
-                } elseif ($answer->is_correct === false) {
-                    $wrongCount++;
-                }
-                // essay (is_correct === null) not auto-graded -> counted as unanswered for auto-grade
-            }
-        }
-
-        $unansweredCount = max(0, count($attemptQuestions) - $correctCount - $wrongCount);
-
-        $percentage = $maxPoints > 0 ? round(($score / $maxPoints) * 100, 2) : 0.0;
-        $grade = $this->letterGrade((float) $percentage);
-
-        ExamResult::updateOrCreate(
-            ['participant_id' => $attempt->exam_participant_id],
-            [
-                'total_score' => $score,
-                'correct_count' => $correctCount,
-                'wrong_count' => $wrongCount,
-                'unanswered_count' => $unansweredCount,
-                'grade' => $grade,
-                'status' => 'graded',
-                'graded_at' => now(),
-            ]
-        );
-
-        return [
-            'total_score' => $score,
-            'correct_count' => $correctCount,
-            'wrong_count' => $wrongCount,
-            'unanswered_count' => $unansweredCount,
-            'grade' => $grade,
-            'status' => 'graded',
-        ];
-    }
-
-    private function letterGrade(float $percentage): ?string
-    {
-        if ($percentage >= 90) return 'A';
-        if ($percentage >= 80) return 'B';
-        if ($percentage >= 70) return 'C';
-        if ($percentage >= 60) return 'D';
-        return 'E';
     }
 
     /**

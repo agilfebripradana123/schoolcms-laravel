@@ -11,10 +11,12 @@ class ExamResult extends Model
 
     protected $fillable = [
         'participant_id',
+        'exam_attempt_id',
         'total_score',
         'correct_count',
         'wrong_count',
         'unanswered_count',
+        'percentage',
         'grade',
         'status',
         'graded_at',
@@ -23,10 +25,12 @@ class ExamResult extends Model
     protected function casts(): array
     {
         return [
+            'exam_attempt_id' => 'integer',
             'total_score' => 'decimal:2',
             'correct_count' => 'integer',
             'wrong_count' => 'integer',
             'unanswered_count' => 'integer',
+            'percentage' => 'decimal:2',
             'graded_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',

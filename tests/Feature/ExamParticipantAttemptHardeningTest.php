@@ -188,6 +188,11 @@ class ExamParticipantAttemptHardeningTest extends TestCase
             $t->unsignedBigInteger('question_id');
             $t->unsignedBigInteger('selected_option_id')->nullable();
             $t->unsignedBigInteger('selected_attempt_option_id')->nullable();
+            $t->decimal('score', 10, 2)->nullable();
+            $t->string('grade_status', 20)->nullable();
+            $t->unsignedBigInteger('graded_by')->nullable();
+            $t->dateTime('graded_at')->nullable();
+            $t->text('feedback')->nullable();
             $t->text('essay_answer')->nullable();
             $t->boolean('is_correct')->nullable();
             $t->dateTime('answered_at');
@@ -217,6 +222,8 @@ class ExamParticipantAttemptHardeningTest extends TestCase
         Schema::create('exam_results', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('participant_id');
+            $t->unsignedBigInteger('exam_attempt_id')->nullable();
+            $t->decimal('percentage', 5, 2)->nullable();
             $t->decimal('total_score', 10, 2)->default(0);
             $t->unsignedInteger('correct_count')->default(0);
             $t->unsignedInteger('wrong_count')->default(0);
