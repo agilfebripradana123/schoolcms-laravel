@@ -7,8 +7,12 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rule;
 
+use App\Models\Examination\QuestionBank;
+
 class UpdateQuestionRequest extends FormRequest
 {
+    use ValidatesQuestionOptions;
+
     public function authorize(): bool
     {
         return true;
@@ -16,8 +20,7 @@ class UpdateQuestionRequest extends FormRequest
 
     public function rules(): array
     {
-        $type = $this->input('type');
-        $questionId = $this->route('question');
+        $type = $this->effectiveType();
 
         $rules = [
             'subject_id' => [
@@ -31,6 +34,12 @@ class UpdateQuestionRequest extends FormRequest
                 'integer',
                 Rule::exists('exam_instructions', 'id'),
             ],
+            'owner_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('users', 'id'),
+            ],
             'question_text' => [
                 'sometimes',
                 'required',
@@ -41,6 +50,16 @@ class UpdateQuestionRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:255',
+            ],
+            'audio_url' => [
+                'nullable',
+                'string',
+                'max:500',
+            ],
+            'video_url' => [
+                'nullable',
+                'string',
+                'max:500',
             ],
             'type' => [
                 'sometimes',
@@ -54,6 +73,21 @@ class UpdateQuestionRequest extends FormRequest
                 'string',
                 Rule::in(['easy', 'medium', 'hard']),
             ],
+            'cognitive_level' => [
+                'nullable',
+                'string',
+                'max:20',
+            ],
+            'competency' => [
+                'nullable',
+                'string',
+                'max:10000',
+            ],
+            'indicator' => [
+                'nullable',
+                'string',
+                'max:10000',
+            ],
             'explanation' => [
                 'nullable',
                 'string',
@@ -65,6 +99,12 @@ class UpdateQuestionRequest extends FormRequest
                 'integer',
                 'min:1',
                 'max:1000',
+            ],
+            'status' => [
+                'sometimes',
+                'nullable',
+                'string',
+                Rule::in(['draft', 'approved', 'archived']),
             ],
             'options' => [
                 'nullable',
@@ -96,6 +136,44 @@ class UpdateQuestionRequest extends FormRequest
         }
 
         return $rules;
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $this->validateQuestionOptionInvariants(
+                $validator,
+                $this->effectiveType(),
+                (array) $this->input('options', [])
+            );
+        });
+    }
+
+    /**
+     * Effective question type for invariant checks.
+     *
+     * An update payload may omit `type` (PATCH-style metadata edit). In that
+     * case the option invariants must still be validated against the persisted
+     * type — otherwise a client could bypass the exactly-one-correct / count
+     * rules simply by not sending `type`.
+     */
+    private function effectiveType(): ?string
+    {
+        $type = $this->input('type');
+        if ($type !== null) {
+            return $type;
+        }
+
+        if (! $this->has('options')) {
+            return null;
+        }
+
+        $id = $this->route('id');
+        if ($id === null) {
+            return null;
+        }
+
+        return QuestionBank::withTrashed()->find((int) $id)?->type;
     }
 
     protected function failedValidation(Validator $validator): void

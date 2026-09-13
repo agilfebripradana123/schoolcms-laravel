@@ -38,10 +38,6 @@ class UpdateExamAnswerRequest extends FormRequest
                 'nullable',
                 'string',
             ],
-            'is_correct' => [
-                'nullable',
-                'boolean',
-            ],
             'answered_at' => [
                 'sometimes',
                 'required',

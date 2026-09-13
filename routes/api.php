@@ -339,8 +339,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAMS
     // =========================
-    Route::get('/exams', [ExamController::class, 'index']);
-    Route::get('/exams/{exam}', [ExamController::class, 'show']);
+    Route::get('/exams', [ExamController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exams/{exam}', [ExamController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exams', [ExamController::class, 'store']);
@@ -353,8 +353,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // QUESTION BANKS
     // =========================
-    Route::get('/questions', [QuestionController::class, 'index']);
-    Route::get('/questions/{id}', [QuestionController::class, 'show']);
+    Route::get('/questions', [QuestionController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/questions/{id}', [QuestionController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/questions', [QuestionController::class, 'store']);
@@ -367,8 +367,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAM SESSIONS
     // =========================
-    Route::get('/exam-sessions', [ExamSessionController::class, 'index']);
-    Route::get('/exam-sessions/{exam_session}', [ExamSessionController::class, 'show']);
+    Route::get('/exam-sessions', [ExamSessionController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-sessions/{exam_session}', [ExamSessionController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-sessions', [ExamSessionController::class, 'store']);
@@ -381,8 +381,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAM SCHEDULES
     // =========================
-    Route::get('/exam-schedules', [ExamScheduleController::class, 'index']);
-    Route::get('/exam-schedules/{exam_schedule}', [ExamScheduleController::class, 'show']);
+    Route::get('/exam-schedules', [ExamScheduleController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-schedules/{exam_schedule}', [ExamScheduleController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-schedules', [ExamScheduleController::class, 'store']);
@@ -395,8 +395,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAM INSTRUCTIONS
     // =========================
-    Route::get('/exam-instructions', [ExamInstructionController::class, 'index']);
-    Route::get('/exam-instructions/{exam_instruction}', [ExamInstructionController::class, 'show']);
+    Route::get('/exam-instructions', [ExamInstructionController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-instructions/{exam_instruction}', [ExamInstructionController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-instructions', [ExamInstructionController::class, 'store']);
@@ -409,8 +409,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAM PARTICIPANTS
     // =========================
-    Route::get('/exam-participants', [ExamParticipantController::class, 'index']);
-    Route::get('/exam-participants/{exam_participant}', [ExamParticipantController::class, 'show']);
+    Route::get('/exam-participants', [ExamParticipantController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-participants/{exam_participant}', [ExamParticipantController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-participants', [ExamParticipantController::class, 'store']);
@@ -423,8 +423,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAM RESULTS
     // =========================
-    Route::get('/exam-results', [ExamResultController::class, 'index']);
-    Route::get('/exam-results/{exam_result}', [ExamResultController::class, 'show']);
+    Route::get('/exam-results', [ExamResultController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-results/{exam_result}', [ExamResultController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-results', [ExamResultController::class, 'store']);
@@ -437,8 +437,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // EXAM ANSWERS
     // =========================
-    Route::get('/exam-answers', [ExamAnswerController::class, 'index']);
-    Route::get('/exam-answers/{exam_answer}', [ExamAnswerController::class, 'show']);
+    Route::get('/exam-answers', [ExamAnswerController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-answers/{exam_answer}', [ExamAnswerController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-answers', [ExamAnswerController::class, 'store']);

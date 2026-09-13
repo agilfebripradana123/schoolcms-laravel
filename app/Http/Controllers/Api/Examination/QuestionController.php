@@ -7,11 +7,9 @@ use App\Http\Requests\Api\Examination\StoreQuestionRequest;
 use App\Http\Requests\Api\Examination\UpdateQuestionRequest;
 use App\Http\Resources\Examination\QuestionBankResource;
 use App\Models\Examination\QuestionBank;
-use App\Models\Examination\QuestionOption;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 class QuestionController extends Controller
 {
@@ -91,17 +89,25 @@ class QuestionController extends Controller
         $options = $validated['options'] ?? [];
         unset($validated['options']);
 
-        $question = DB::connection('mysql')->transaction(function () use ($validated, $options) {
+        // Server-side defaults: status (foundation lifecycle) and owner
+        // (authenticated manager). `code` is never client-input: it is derived
+        // deterministically from the auto-increment id below and is immutable.
+        $validated['status'] = $validated['status'] ?? 'draft';
+        $validated['owner_id'] = $validated['owner_id'] ?? $request->user()?->id;
+
+        $question = DB::transaction(function () use ($validated, $options) {
             $question = QuestionBank::create($validated);
 
-            if (!empty($options)) {
-                foreach ($options as $index => $option) {
-                    $question->options()->create([
-                        'option_text' => $option['option_text'],
-                        'option_image' => $option['option_image'] ?? null,
-                        'is_correct' => $option['is_correct'] ?? false,
-                    ]);
-                }
+            // Deterministic immutable code (matches Phase 2A backfill format).
+            $question->code = 'Q-'.str_pad((string) $question->id, 6, '0', STR_PAD_LEFT);
+            $question->save();
+
+            foreach ($options as $index => $option) {
+                $question->options()->create([
+                    'option_text' => $option['option_text'],
+                    'option_image' => $option['option_image'] ?? null,
+                    'is_correct' => $option['is_correct'] ?? false,
+                ]);
             }
 
             return $question->load(['subject', 'options']);
@@ -130,7 +136,9 @@ class QuestionController extends Controller
         $options = $validated['options'] ?? null;
         unset($validated['options']);
 
-        DB::connection('mysql')->transaction(function () use ($question, $validated, $options) {
+        DB::transaction(function () use ($question, $validated, $options) {
+            // `code` is intentionally absent from $validated: updates never
+            // regenerate or replace a question code.
             $question->update($validated);
 
             if ($options !== null) {

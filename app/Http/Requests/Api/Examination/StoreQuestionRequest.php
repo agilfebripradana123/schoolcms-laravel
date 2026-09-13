@@ -9,6 +9,8 @@ use Illuminate\Validation\Rule;
 
 class StoreQuestionRequest extends FormRequest
 {
+    use ValidatesQuestionOptions;
+
     public function authorize(): bool
     {
         return true;
@@ -29,6 +31,11 @@ class StoreQuestionRequest extends FormRequest
                 'integer',
                 Rule::exists('exam_instructions', 'id'),
             ],
+            'owner_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('users', 'id'),
+            ],
             'question_text' => [
                 'required',
                 'string',
@@ -38,6 +45,16 @@ class StoreQuestionRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:255',
+            ],
+            'audio_url' => [
+                'nullable',
+                'string',
+                'max:500',
+            ],
+            'video_url' => [
+                'nullable',
+                'string',
+                'max:500',
             ],
             'type' => [
                 'required',
@@ -49,6 +66,21 @@ class StoreQuestionRequest extends FormRequest
                 'string',
                 Rule::in(['easy', 'medium', 'hard']),
             ],
+            'cognitive_level' => [
+                'nullable',
+                'string',
+                'max:20',
+            ],
+            'competency' => [
+                'nullable',
+                'string',
+                'max:10000',
+            ],
+            'indicator' => [
+                'nullable',
+                'string',
+                'max:10000',
+            ],
             'explanation' => [
                 'nullable',
                 'string',
@@ -59,6 +91,11 @@ class StoreQuestionRequest extends FormRequest
                 'integer',
                 'min:1',
                 'max:1000',
+            ],
+            'status' => [
+                'nullable',
+                'string',
+                Rule::in(['draft', 'approved', 'archived']),
             ],
             'options' => [
                 'nullable',
@@ -90,6 +127,17 @@ class StoreQuestionRequest extends FormRequest
         }
 
         return $rules;
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $this->validateQuestionOptionInvariants(
+                $validator,
+                $this->input('type'),
+                (array) $this->input('options', [])
+            );
+        });
     }
 
     protected function failedValidation(Validator $validator): void

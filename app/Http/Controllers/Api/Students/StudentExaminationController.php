@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Students;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\Examination\StudentExamAnswerResource;
+use App\Http\Resources\Examination\StudentExamParticipantResource;
+use App\Http\Resources\Examination\StudentExamResultResource;
 use App\Models\Examination\Exam;
 use App\Models\Examination\ExamInstruction;
 use App\Models\Examination\ExamParticipant;
@@ -89,7 +92,11 @@ class StudentExaminationController extends Controller
     public function examParticipants(Request $request): JsonResponse
     {
         $student = $request->attributes->get('student_profile');
-        $participants = ExamParticipant::where('student_id', $student->id)->with(['exam', 'result'])->get();
+        $participants = ExamParticipant::where('student_id', $student->id)
+            ->with(['exam.subject', 'result'])
+            ->get()
+            ->map(fn (ExamParticipant $p) => new StudentExamParticipantResource($p));
+
         return response()->json([
             'success' => true,
             'message' => 'Exam participants retrieved successfully',
@@ -101,7 +108,11 @@ class StudentExaminationController extends Controller
     {
         $student = $request->attributes->get('student_profile');
         $participantIds = ExamParticipant::where('student_id', $student->id)->pluck('id');
-        $results = ExamResult::whereIn('participant_id', $participantIds)->with(['participant.exam'])->get();
+        $results = ExamResult::whereIn('participant_id', $participantIds)
+            ->with(['participant.exam.subject'])
+            ->get()
+            ->map(fn (ExamResult $result) => new StudentExamResultResource($result));
+
         return response()->json([
             'success' => true,
             'message' => 'Exam results retrieved successfully',
@@ -113,7 +124,10 @@ class StudentExaminationController extends Controller
     {
         $student = $request->attributes->get('student_profile');
         $participantIds = ExamParticipant::where('student_id', $student->id)->pluck('id');
-        $answers = ExamAnswer::whereIn('participant_id', $participantIds)->get();
+        $answers = ExamAnswer::whereIn('participant_id', $participantIds)
+            ->get()
+            ->map(fn (ExamAnswer $answer) => new StudentExamAnswerResource($answer));
+
         return response()->json([
             'success' => true,
             'message' => 'Exam answers retrieved successfully',

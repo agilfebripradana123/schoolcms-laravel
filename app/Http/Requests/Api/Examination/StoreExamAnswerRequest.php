@@ -36,10 +36,6 @@ class StoreExamAnswerRequest extends FormRequest
                 'nullable',
                 'string',
             ],
-            'is_correct' => [
-                'nullable',
-                'boolean',
-            ],
             'answered_at' => [
                 'required',
                 'date',
