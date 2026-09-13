@@ -9,6 +9,7 @@ use App\Models\Examination\Exam;
 use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptEvent;
+use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamResult;
 use App\Models\Examination\QuestionBank;
@@ -274,15 +275,39 @@ class SecureExamAttemptTest extends TestCase
         Schema::create('exam_answers', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_attempt_id')->nullable();
+            $t->unsignedBigInteger('attempt_question_id')->nullable();
             $t->unsignedBigInteger('participant_id');
             $t->unsignedBigInteger('question_id');
             $t->unsignedBigInteger('selected_option_id')->nullable();
+            $t->unsignedBigInteger('selected_attempt_option_id')->nullable();
             $t->text('essay_answer')->nullable();
             $t->boolean('is_correct')->nullable();
             $t->dateTime('answered_at');
             $t->timestamps();
             $t->unique(['exam_attempt_id', 'question_id'], 'uq_exam_answers_attempt_question');
             $t->unique(['participant_id', 'question_id'], 'uq_exam_answers_participant_question');
+            $t->unique(['exam_attempt_id', 'attempt_question_id'], 'uq_exam_answers_att_q_snapshot');
+        });
+        Schema::create('exam_attempt_questions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_attempt_id');
+            $t->unsignedInteger('source_question_id')->nullable();
+            $t->string('question_code', 50)->nullable();
+            $t->text('question_text');
+            $t->string('question_type', 50);
+            $t->unsignedInteger('points')->default(1);
+            $t->unsignedInteger('position')->default(0);
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_question_options', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('attempt_question_id');
+            $t->unsignedInteger('source_option_id')->nullable();
+            $t->text('option_text');
+            $t->string('option_image', 500)->nullable();
+            $t->unsignedInteger('position')->default(0);
+            $t->boolean('is_correct')->default(false);
+            $t->timestamps();
         });
     }
 
@@ -457,15 +482,16 @@ class SecureExamAttemptTest extends TestCase
     public function test_reconnect_show_returns_saved_answers(): void
     {
         $attemptId = $this->startFor($this->userA);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o1Id])->assertStatus(200);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
 
         $res = $this->asA()->getJson("/api/student/exam-attempts/{$attemptId}");
         $res->assertStatus(200)
             ->assertJsonPath("data.attempt.id", $attemptId)
-            ->assertJsonPath("data.answers.{$this->q1Id}.selected_option_id", $this->q1o1Id);
+            ->assertJsonPath("data.answers.{$s['q'.$this->q1Id]}.selected_option_id", $s['q'.$this->q1Id.'o'.$this->q1o1Id]);
 
         $answers = $res->json('data.answers');
-        $this->assertArrayNotHasKey((string) $this->q2Id, $answers);
+        $this->assertArrayNotHasKey((string) $s['q'.$this->q2Id], $answers);
     }
 
     // -----------------------------------------------------------------
@@ -475,8 +501,9 @@ class SecureExamAttemptTest extends TestCase
     public function test_active_attempt_accepts_answer(): void
     {
         $attemptId = $this->startFor($this->userA);
-        $res = $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o1Id]);
-        $res->assertStatus(200)->assertJsonPath('data.selected_option_id', $this->q1o1Id);
+        $s = $this->snap($attemptId);
+        $res = $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]]);
+        $res->assertStatus(200)->assertJsonPath('data.selected_option_id', $s['q'.$this->q1Id.'o'.$this->q1o1Id]);
     }
 
     public function test_expired_attempt_rejects_answer_and_transitions_status(): void
@@ -508,11 +535,12 @@ class SecureExamAttemptTest extends TestCase
     public function test_answer_update_is_idempotent(): void
     {
         $attemptId = $this->startFor($this->userA);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o1Id])->assertStatus(200);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o2Id])->assertStatus(200);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o2Id]])->assertStatus(200);
 
-        $this->assertSame(1, ExamAnswer::where('exam_attempt_id', $attemptId)->where('question_id', $this->q1Id)->count());
-        $this->assertDatabaseHas('exam_answers', ['exam_attempt_id' => $attemptId, 'question_id' => $this->q1Id, 'selected_option_id' => $this->q1o2Id]);
+        $this->assertSame(1, ExamAnswer::where('exam_attempt_id', $attemptId)->where('attempt_question_id', $s['q'.$this->q1Id])->count());
+        $this->assertDatabaseHas('exam_answers', ['exam_attempt_id' => $attemptId, 'attempt_question_id' => $s['q'.$this->q1Id], 'selected_attempt_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o2Id]]);
     }
 
     public function test_answer_question_outside_attempt_rejected(): void
@@ -525,7 +553,8 @@ class SecureExamAttemptTest extends TestCase
     public function test_answer_invalid_option_rejected(): void
     {
         $attemptId = $this->startFor($this->userA);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => 999999])->assertStatus(422);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => 999999])->assertStatus(422);
     }
 
     // -----------------------------------------------------------------
@@ -535,8 +564,9 @@ class SecureExamAttemptTest extends TestCase
     public function test_submit_computes_result(): void
     {
         $attemptId = $this->startFor($this->userA);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o1Id])->assertStatus(200);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q2Id}", ['selected_option_id' => $this->q2o1Id])->assertStatus(200);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q2Id]}", ['selected_option_id' => $s['q'.$this->q2Id.'o'.$this->q2o1Id]])->assertStatus(200);
 
         $res = $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit");
         $res->assertStatus(200)
@@ -557,7 +587,8 @@ class SecureExamAttemptTest extends TestCase
     public function test_submit_expired_attempt_finalizes(): void
     {
         $attemptId = $this->startFor($this->userA);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o1Id])->assertStatus(200);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
         ExamAttempt::where('id', $attemptId)->update(['expires_at' => now()->subMinute()]);
 
         $res = $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit");
@@ -619,10 +650,11 @@ class SecureExamAttemptTest extends TestCase
 
     public function test_scoring_uses_correct_option_identity(): void
     {
-        // q1 correct option is q1o1. Answer q1o2 (wrong) -> correct_count 0 for q1.
+        // q1 correct option is Q1A. Answer Q1B (wrong) -> correct_count 0 for q1.
         $attemptId = $this->startFor($this->userA);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1Id}", ['selected_option_id' => $this->q1o2Id])->assertStatus(200);
-        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q2Id}", ['selected_option_id' => $this->q2o1Id])->assertStatus(200);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o2Id]])->assertStatus(200);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q2Id]}", ['selected_option_id' => $s['q'.$this->q2Id.'o'.$this->q2o1Id]])->assertStatus(200);
 
         $res = $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit");
         $res->assertStatus(200)->assertJsonPath('data.result.correct_count', 1)->assertJsonPath('data.result.total_score', 20);
@@ -666,5 +698,24 @@ class SecureExamAttemptTest extends TestCase
         $this->actingAs($user, 'sanctum');
         $id = $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examId])->assertStatus(200)->json('data.id');
         return (int) $id;
+    }
+
+    /**
+     * Map source question/option ids to SNAPSHOT ids for the given attempt.
+     * key 'q{sourceQid}' -> attempt_question id; 'q{sourceQid}o{sourceOid}' -> attempt_option id.
+     */
+    private function snap(int $attemptId): array
+    {
+        $refs = [];
+        foreach (ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->with('options')->get() as $aq) {
+            $refs['q'.$aq->source_question_id] = $aq->id;
+            foreach ($aq->options as $option) {
+                if ($option->source_option_id !== null) {
+                    $refs['q'.$aq->source_question_id.'o'.$option->source_option_id] = $option->id;
+                }
+            }
+        }
+
+        return $refs;
     }
 }

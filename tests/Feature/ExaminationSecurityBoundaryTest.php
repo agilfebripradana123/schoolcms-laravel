@@ -152,12 +152,35 @@ class ExaminationSecurityBoundaryTest extends TestCase
         Schema::create('exam_answers', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_attempt_id')->nullable();
+            $t->unsignedBigInteger('attempt_question_id')->nullable();
             $t->unsignedBigInteger('participant_id');
             $t->unsignedBigInteger('question_id');
             $t->unsignedBigInteger('selected_option_id')->nullable();
+            $t->unsignedBigInteger('selected_attempt_option_id')->nullable();
             $t->text('essay_answer')->nullable();
             $t->boolean('is_correct')->nullable();
             $t->dateTime('answered_at');
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_questions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_attempt_id');
+            $t->unsignedInteger('source_question_id')->nullable();
+            $t->string('question_code', 50)->nullable();
+            $t->text('question_text');
+            $t->string('question_type', 50);
+            $t->unsignedInteger('points')->default(1);
+            $t->unsignedInteger('position')->default(0);
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_question_options', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('attempt_question_id');
+            $t->unsignedInteger('source_option_id')->nullable();
+            $t->text('option_text');
+            $t->string('option_image', 500)->nullable();
+            $t->unsignedInteger('position')->default(0);
+            $t->boolean('is_correct')->default(false);
             $t->timestamps();
         });
         Schema::create('exam_questions', function (Blueprint $t) {
@@ -438,8 +461,13 @@ class ExaminationSecurityBoundaryTest extends TestCase
             ->assertStatus(200)
             ->json('data.id');
 
+        // Resolve the snapshot attempt-question id for the fixture question.
+        $attemptQuestion = collect($this->getJson("/api/student/exam-attempts/{$attemptId}/questions")->json('data.questions'))
+            ->firstWhere('source_question_id', $this->questionId);
+        $this->assertNotNull($attemptQuestion);
+
         // Smuggle grading truth the client must never control.
-        $response = $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->questionId}", [
+        $response = $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$attemptQuestion['id']}", [
             'selected_option_id' => null,
             'essay_answer' => null,
             'is_correct' => true,
@@ -450,7 +478,7 @@ class ExaminationSecurityBoundaryTest extends TestCase
         $response->assertStatus(200);
 
         $stored = ExamAnswer::where('exam_attempt_id', $attemptId)
-            ->where('question_id', $this->questionId)
+            ->where('attempt_question_id', $attemptQuestion['id'])
             ->first();
         $this->assertNotNull($stored);
         $this->assertNull($stored->is_correct, 'client-supplied is_correct must be ignored');

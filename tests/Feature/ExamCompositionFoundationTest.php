@@ -153,6 +153,27 @@ class ExamCompositionFoundationTest extends TestCase
             $t->dateTime('end_datetime')->nullable();
             $t->timestamps();
         });
+        Schema::create('exam_attempt_questions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_attempt_id');
+            $t->unsignedInteger('source_question_id')->nullable();
+            $t->string('question_code', 50)->nullable();
+            $t->text('question_text');
+            $t->string('question_type', 50);
+            $t->unsignedInteger('points')->default(1);
+            $t->unsignedInteger('position')->default(0);
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_question_options', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('attempt_question_id');
+            $t->unsignedInteger('source_option_id')->nullable();
+            $t->text('option_text');
+            $t->string('option_image', 500)->nullable();
+            $t->unsignedInteger('position')->default(0);
+            $t->boolean('is_correct')->default(false);
+            $t->timestamps();
+        });
         Schema::create('exam_attempts', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_participant_id');
@@ -497,7 +518,7 @@ class ExamCompositionFoundationTest extends TestCase
         $attemptId = $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->legacyExam->id])->assertStatus(200)->json('data.id');
 
         $questions = $this->getJson("/api/student/exam-attempts/{$attemptId}/questions")->assertStatus(200)->json('data.questions');
-        $ids = collect($questions)->pluck('id')->all();
+        $ids = collect($questions)->pluck('source_question_id')->all();
 
         // legacy subject bank = [qApproved, qSecond, qDraft, qArchived], sliced to total_questions=1 -> first by id = qApproved
         $this->assertSame([$this->qApproved->id], $ids);
@@ -509,7 +530,7 @@ class ExamCompositionFoundationTest extends TestCase
         $attemptId = $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->composedExam->id])->assertStatus(200)->json('data.id');
 
         $questions = $this->getJson("/api/student/exam-attempts/{$attemptId}/questions")->assertStatus(200)->json('data.questions');
-        $ids = collect($questions)->pluck('id')->all();
+        $ids = collect($questions)->pluck('source_question_id')->all();
         $points = collect($questions)->pluck('points')->all();
 
         // composition authority: [qSecond (pos 1), qApproved (pos 2)] — NOT affected by total_questions=99 slicing

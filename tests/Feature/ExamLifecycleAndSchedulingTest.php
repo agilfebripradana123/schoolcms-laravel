@@ -167,6 +167,27 @@ class ExamLifecycleAndSchedulingTest extends TestCase
             $t->boolean('login_allowed')->default(true);
             $t->timestamps();
         });
+        Schema::create('exam_attempt_questions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_attempt_id');
+            $t->unsignedInteger('source_question_id')->nullable();
+            $t->string('question_code', 50)->nullable();
+            $t->text('question_text');
+            $t->string('question_type', 50);
+            $t->unsignedInteger('points')->default(1);
+            $t->unsignedInteger('position')->default(0);
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_question_options', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('attempt_question_id');
+            $t->unsignedInteger('source_option_id')->nullable();
+            $t->text('option_text');
+            $t->string('option_image', 500)->nullable();
+            $t->unsignedInteger('position')->default(0);
+            $t->boolean('is_correct')->default(false);
+            $t->timestamps();
+        });
         Schema::create('exam_attempts', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_participant_id');

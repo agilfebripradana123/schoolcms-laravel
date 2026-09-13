@@ -7,6 +7,8 @@ use App\Models\Examination\Exam;
 use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptEvent;
+use App\Models\Examination\ExamAttemptQuestion;
+use App\Models\Examination\ExamAttemptQuestionOption;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\ExamResult;
@@ -135,6 +137,16 @@ class StudentExamAttemptController extends Controller
             $attempt->generateToken();
             $attempt->save();
 
+            // Phase 2G: freeze the exact questions/options/points/order the
+            // attempt will use. Runs inside the same transaction as attempt
+            // creation, so a snapshot failure rolls the attempt back too.
+            $this->buildAttemptSnapshot(
+                $attempt,
+                $questionIds,
+                $optionOrder,
+                $this->compositionWeightMap($exam)
+            );
+
             // Reflect attempt start on the participant.
             $participant->status = 'started';
             if ($participant->started_at === null) {
@@ -161,13 +173,13 @@ class StudentExamAttemptController extends Controller
 
         $this->lazyExpire($attempt, $now);
 
-        // Include previously saved answers so an interrupted/reloaded session
-        // can resume (question_id -> selected_option_id / essay_answer).
+        // Resume/saved-answers payload keyed by snapshot question identity so
+        // it lines up 1:1 with the delivery ids from `/questions`.
         $savedAnswers = ExamAnswer::where('exam_attempt_id', $attempt->id)
             ->get()
             ->mapWithKeys(fn ($a) => [
-                (string) $a->question_id => [
-                    'selected_option_id' => $a->selected_option_id,
+                (string) ($a->attempt_question_id ?? $a->question_id) => [
+                    'selected_option_id' => $a->selected_attempt_option_id ?? $a->selected_option_id,
                     'essay_answer' => $a->essay_answer,
                 ],
             ])
@@ -198,20 +210,16 @@ class StudentExamAttemptController extends Controller
             return $this->unprocessable('Attempt is not active.', $this->attemptPayload($attempt, $now));
         }
 
-        $order = $attempt->question_order ?? [];
-        $questions = QuestionBank::whereIn('id', $order)->get()->keyBy('id');
-        $weightMap = $this->compositionWeightMap($attempt->exam);
+        // Phase 2G: delivery comes from the immutable attempt snapshot, never
+        // from the mutable live QuestionBank.
+        $attemptQuestions = ExamAttemptQuestion::with('options')
+            ->where('exam_attempt_id', $attempt->id)
+            ->orderBy('position')
+            ->get();
 
-        $data = array_map(function ($questionId) use ($questions, $attempt, $weightMap) {
-            /** @var QuestionBank|null $q */
-            $q = $questions->get($questionId);
-            if (!$q) {
-                return null;
-            }
-            return $this->questionPayload($q, $attempt, $weightMap);
-        }, $order);
-
-        $data = array_values(array_filter($data));
+        $data = $attemptQuestions->map(
+            fn (ExamAttemptQuestion $aq) => $this->snapshotQuestionPayload($aq)
+        )->all();
 
         return $this->ok('Questions retrieved.', [
             'attempt' => $this->attemptSummary($attempt, $now),
@@ -221,6 +229,8 @@ class StudentExamAttemptController extends Controller
 
     /**
      * PUT /api/student/exam-attempts/{attempt}/answers/{question}
+     * `{question}` is the SNAPSHOT attempt-question id delivered by
+     * `/questions` (never the live question_banks id).
      */
     public function answer(Request $request, int $attemptId, int $questionId): JsonResponse
     {
@@ -238,9 +248,12 @@ class StudentExamAttemptController extends Controller
             return $this->unprocessable('Attempt is not active.', $this->attemptPayload($attempt, $now));
         }
 
-        // Question must belong to this attempt.
-        $order = $attempt->question_order ?? [];
-        if (!in_array($questionId, $order, true)) {
+        // Question must belong to this attempt's snapshot.
+        $attemptQuestion = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
+            ->where('id', $questionId)
+            ->first();
+
+        if (!$attemptQuestion) {
             return $this->unprocessable('Question does not belong to this attempt.');
         }
 
@@ -249,39 +262,38 @@ class StudentExamAttemptController extends Controller
             'essay_answer' => ['nullable', 'string'],
         ]);
 
-        $question = QuestionBank::find($questionId);
-        if (!$question) {
-            return $this->unprocessable('Question not found.');
-        }
-
-        $selectedOption = null;
+        $selectedAttemptOption = null;
         if (!empty($validated['selected_option_id'])) {
-            $selectedOption = QuestionOption::where('question_id', $questionId)
+            // The option id is the SNAPSHOT attempt-option id.
+            $selectedAttemptOption = ExamAttemptQuestionOption::where('attempt_question_id', $attemptQuestion->id)
                 ->where('id', (int) $validated['selected_option_id'])
                 ->first();
-            if (!$selectedOption) {
+            if (!$selectedAttemptOption) {
                 return $this->unprocessable('Invalid option for this question.');
             }
         }
 
+        // Correctness is resolved server-side from the snapshot (never client).
         $isCorrect = null;
-        if ($selectedOption !== null && in_array($question->type, ['multiple_choice', 'true_false'], true)) {
-            $isCorrect = (bool) $selectedOption->is_correct;
+        if ($selectedAttemptOption !== null && in_array($attemptQuestion->question_type, ['multiple_choice', 'true_false'], true)) {
+            $isCorrect = (bool) $selectedAttemptOption->is_correct;
         }
 
-        // Idempotent autosave: keyed by (attempt, question) via unique index.
+        // Idempotent autosave keyed by (attempt, snapshot question).
         $answer = ExamAnswer::where('exam_attempt_id', $attempt->id)
-            ->where('question_id', $questionId)
+            ->where('attempt_question_id', $attemptQuestion->id)
             ->first();
 
         if ($answer === null) {
             $answer = new ExamAnswer();
             $answer->exam_attempt_id = $attempt->id;
             $answer->participant_id = $attempt->exam_participant_id;
-            $answer->question_id = $questionId;
+            $answer->attempt_question_id = $attemptQuestion->id;
+            $answer->question_id = $attemptQuestion->source_question_id;
         }
 
-        $answer->selected_option_id = $selectedOption?->id;
+        $answer->selected_attempt_option_id = $selectedAttemptOption?->id;
+        $answer->selected_option_id = null; // snapshot identity is authoritative
         $answer->essay_answer = $validated['essay_answer'] ?? null;
         $answer->is_correct = $isCorrect;
         $answer->answered_at = $now;
@@ -289,7 +301,7 @@ class StudentExamAttemptController extends Controller
 
         return $this->ok('Answer saved.', [
             'question_id' => $questionId,
-            'selected_option_id' => $answer->selected_option_id,
+            'selected_option_id' => $answer->selected_attempt_option_id,
             'essay_answer' => $answer->essay_answer,
             'answered_at' => $answer->answered_at?->toISOString(),
         ]);
@@ -568,29 +580,26 @@ class StudentExamAttemptController extends Controller
 
     private function computeAndStoreResult(ExamAttempt $attempt): ?array
     {
-        $order = $attempt->question_order ?? [];
-        $questions = QuestionBank::whereIn('id', $order)->get()->keyBy('id');
-        $weightMap = $this->compositionWeightMap($attempt->exam);
+        // Phase 2G: scoring reads the immutable attempt snapshot.
+        $attemptQuestions = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
+            ->orderBy('position')
+            ->pluck('points', 'id')
+            ->all();
 
-        $answers = ExamAnswer::where('exam_attempt_id', $attempt->id)->get()->keyBy('question_id');
+        $answers = ExamAnswer::where('exam_attempt_id', $attempt->id)->get()->keyBy('attempt_question_id');
 
         $correctCount = 0;
         $wrongCount = 0;
         $score = 0;
         $maxPoints = 0;
 
-        foreach ($order as $questionId) {
-            $question = $questions->get($questionId);
-            if (!$question) {
-                continue;
-            }
-            $points = $weightMap[$questionId] ?? (int) $question->points;
-            $maxPoints += $points;
-            $answer = $answers->get($questionId);
+        foreach ($attemptQuestions as $attemptQuestionId => $points) {
+            $maxPoints += (int) $points;
+            $answer = $answers->get($attemptQuestionId);
             if ($answer) {
                 if ($answer->is_correct === true) {
                     $correctCount++;
-                    $score += $points;
+                    $score += (int) $points;
                 } elseif ($answer->is_correct === false) {
                     $wrongCount++;
                 }
@@ -598,7 +607,7 @@ class StudentExamAttemptController extends Controller
             }
         }
 
-        $unansweredCount = max(0, count($order) - $correctCount - $wrongCount);
+        $unansweredCount = max(0, count($attemptQuestions) - $correctCount - $wrongCount);
 
         $percentage = $maxPoints > 0 ? round(($score / $maxPoints) * 100, 2) : 0.0;
         $grade = $this->letterGrade((float) $percentage);
@@ -635,35 +644,79 @@ class StudentExamAttemptController extends Controller
         return 'E';
     }
 
-    private function questionPayload(QuestionBank $question, ExamAttempt $attempt, array $weightMap = []): array
+    /**
+     * Phase 2G: sanitized delivery payload from the immutable snapshot.
+     * Never contains is_correct, explanation, or any grading metadata.
+     */
+    private function snapshotQuestionPayload(ExamAttemptQuestion $attemptQuestion): array
     {
-        $optionMap = $attempt->option_order ?? [];
-        $orderedIds = $optionMap[(string) $question->id] ?? $question->options->pluck('id')->all();
-
-        $optionsById = $question->options->keyBy('id');
-        $options = [];
-        foreach ($orderedIds as $oid) {
-            $opt = $optionsById->get($oid);
-            if (!$opt) {
-                continue;
-            }
-            // Deliberately excludes is_correct / explanation.
-            $options[] = [
-                'id' => $opt->id,
-                'option_text' => $opt->option_text,
-                'option_image' => $opt->option_image,
-            ];
-        }
+        $options = $attemptQuestion->options
+            ->sortBy('position')
+            ->values()
+            ->map(function ($option) {
+                return [
+                    'id' => $option->id,
+                    'option_text' => $option->option_text,
+                    'option_image' => $option->option_image,
+                ];
+            })
+            ->all();
 
         return [
-            'id' => $question->id,
-            'question_text' => $question->question_text,
-            'question_image' => $question->question_image,
-            'type' => $question->type,
-            'difficulty' => $question->difficulty,
-            'points' => $weightMap[(string) $question->id] ?? (int) $question->points,
+            'id' => $attemptQuestion->id,
+            'source_question_id' => $attemptQuestion->source_question_id,
+            'question_text' => $attemptQuestion->question_text,
+            'question_type' => $attemptQuestion->question_type,
+            'difficulty' => null,
+            'points' => (int) $attemptQuestion->points,
             'options' => $options,
         ];
+    }
+
+    /**
+     * Phase 2G: freezes the resolved question set into per-attempt snapshot
+     * rows. Option rows are written in the attempt's persistent order (shuffle
+     * already applied) and grading truth (is_correct) is copied from the bank
+     * at this moment. MUST run inside the attempt creation transaction.
+     */
+    private function buildAttemptSnapshot(ExamAttempt $attempt, array $questionIds, array $optionOrder, array $weightMap): void
+    {
+        $questionsById = QuestionBank::with('options')->whereIn('id', $questionIds)->get()->keyBy('id');
+
+        foreach (array_values($questionIds) as $position => $questionId) {
+            $question = $questionsById->get($questionId);
+            if (!$question) {
+                continue; // defensive; guarded by composition/legacy resolution
+            }
+
+            $attemptQuestion = ExamAttemptQuestion::create([
+                'exam_attempt_id' => $attempt->id,
+                'source_question_id' => $question->id,
+                'question_code' => $question->code,
+                'question_text' => $question->question_text,
+                'question_type' => $question->type,
+                'points' => $weightMap[(string) $question->id] ?? (int) $question->points,
+                'position' => $position + 1,
+            ]);
+
+            $orderedOptionIds = $optionOrder[(string) $question->id] ?? [];
+            $optionsById = $question->options->keyBy('id');
+
+            foreach ($orderedOptionIds as $optionPosition => $optionId) {
+                $option = $optionsById->get($optionId);
+                if (!$option) {
+                    continue;
+                }
+                ExamAttemptQuestionOption::create([
+                    'attempt_question_id' => $attemptQuestion->id,
+                    'source_option_id' => $option->id,
+                    'option_text' => $option->option_text,
+                    'option_image' => $option->option_image,
+                    'position' => $optionPosition + 1,
+                    'is_correct' => (bool) $option->is_correct,
+                ]);
+            }
+        }
     }
 
     private function attemptPayload(ExamAttempt $attempt, $now): array

@@ -17,6 +17,8 @@ class ExamAnswer extends Model
         'is_correct',
         'answered_at',
         'exam_attempt_id',
+        'attempt_question_id',
+        'selected_attempt_option_id',
     ];
 
     protected function casts(): array
@@ -37,6 +39,16 @@ class ExamAnswer extends Model
     public function attempt(): BelongsTo
     {
         return $this->belongsTo(ExamAttempt::class, 'exam_attempt_id');
+    }
+
+    public function attemptQuestion(): BelongsTo
+    {
+        return $this->belongsTo(ExamAttemptQuestion::class, 'attempt_question_id');
+    }
+
+    public function attemptedOption(): BelongsTo
+    {
+        return $this->belongsTo(ExamAttemptQuestionOption::class, 'selected_attempt_option_id');
     }
 
     public function question(): BelongsTo

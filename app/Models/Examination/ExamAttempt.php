@@ -71,6 +71,11 @@ class ExamAttempt extends Model
         return $this->hasMany(ExamAttemptEvent::class, 'exam_attempt_id');
     }
 
+    public function attemptQuestions(): HasMany
+    {
+        return $this->hasMany(ExamAttemptQuestion::class, 'exam_attempt_id');
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;

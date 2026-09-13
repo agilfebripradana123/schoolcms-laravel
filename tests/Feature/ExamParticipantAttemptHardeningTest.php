@@ -7,6 +7,7 @@ use App\Models\Examination\Exam;
 use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamParticipant;
+use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\ExamResult;
 use App\Models\Examination\ExamSchedule;
@@ -182,12 +183,35 @@ class ExamParticipantAttemptHardeningTest extends TestCase
         Schema::create('exam_answers', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_attempt_id')->nullable();
+            $t->unsignedBigInteger('attempt_question_id')->nullable();
             $t->unsignedBigInteger('participant_id');
             $t->unsignedBigInteger('question_id');
             $t->unsignedBigInteger('selected_option_id')->nullable();
+            $t->unsignedBigInteger('selected_attempt_option_id')->nullable();
             $t->text('essay_answer')->nullable();
             $t->boolean('is_correct')->nullable();
             $t->dateTime('answered_at');
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_questions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_attempt_id');
+            $t->unsignedInteger('source_question_id')->nullable();
+            $t->string('question_code', 50)->nullable();
+            $t->text('question_text');
+            $t->string('question_type', 50);
+            $t->unsignedInteger('points')->default(1);
+            $t->unsignedInteger('position')->default(0);
+            $t->timestamps();
+        });
+        Schema::create('exam_attempt_question_options', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('attempt_question_id');
+            $t->unsignedInteger('source_option_id')->nullable();
+            $t->text('option_text');
+            $t->string('option_image', 500)->nullable();
+            $t->unsignedInteger('position')->default(0);
+            $t->boolean('is_correct')->default(false);
             $t->timestamps();
         });
         Schema::create('exam_results', function (Blueprint $t) {
@@ -269,6 +293,23 @@ class ExamParticipantAttemptHardeningTest extends TestCase
         Sanctum::actingAs($user);
 
         return $this->postJson('/api/student/exam-attempts/start', array_merge(['exam_id' => $examId], $extra));
+    }
+
+    /**
+     * Resolve the snapshot attempt-question id + correct snapshot option id for
+     * a source question in the given attempt.
+     */
+    private function snapshotRefs(int $attemptId, int $sourceQid): array
+    {
+        $aq = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)
+            ->where('source_question_id', $sourceQid)
+            ->with('options')
+            ->first();
+
+        return [
+            'aq' => $aq->id,
+            'correct' => collect($aq->options)->firstWhere('is_correct', true)->id ?? null,
+        ];
     }
 
     private function addWindow(int $examId, string $start, string $end): ExamSchedule
@@ -439,7 +480,8 @@ class ExamParticipantAttemptHardeningTest extends TestCase
         $resumed = $this->startAs($this->studentA->user, $this->examMulti->id)->assertStatus(200)->json('data.id');
         $this->assertSame($first, $resumed, 'in-flight attempt resumes after window ends');
 
-        $this->putJson("/api/student/exam-attempts/{$first}/answers/{$this->q1->id}", ['selected_option_id' => $this->correctOption->id])->assertStatus(200);
+        $ref = $this->snapshotRefs($first, $this->q1->id);
+        $this->putJson("/api/student/exam-attempts/{$first}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
         $this->postJson("/api/student/exam-attempts/{$first}/submit")->assertStatus(200);
     }
 
@@ -475,11 +517,12 @@ class ExamParticipantAttemptHardeningTest extends TestCase
     public function test_autosave_is_idempotent(): void
     {
         $attemptId = $this->startAs($this->studentA->user, $this->examMulti->id)->assertStatus(200)->json('data.id');
+        $ref = $this->snapshotRefs($attemptId, $this->q1->id);
 
-        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1->id}", ['selected_option_id' => $this->correctOption->id])->assertStatus(200);
-        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$this->q1->id}", ['selected_option_id' => $this->correctOption->id])->assertStatus(200);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
 
-        $this->assertSame(1, ExamAnswer::where('exam_attempt_id', $attemptId)->where('question_id', $this->q1->id)->count());
+        $this->assertSame(1, ExamAnswer::where('exam_attempt_id', $attemptId)->where('attempt_question_id', $ref['aq'])->count());
     }
 
     // -----------------------------------------------------------------
