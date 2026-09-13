@@ -10,10 +10,12 @@ use App\Models\Examination\ExamAttemptEvent;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\ExamResult;
+use App\Models\Examination\ExamSchedule;
 use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -88,6 +90,21 @@ class StudentExamAttemptController extends Controller
                 $this->lazyExpire($active, $now);
                 if ($active->status === ExamAttempt::STATUS_ACTIVE) {
                     return $this->ok('Active attempt resumed.', $this->attemptPayload($active, $now));
+                }
+            }
+
+            // Phase 2E execution window: server-side gate for NEW attempts only.
+            // Resuming an in-flight attempt above is intentionally unaffected.
+            $window = $this->executionWindowState($participant);
+            if ($window !== null) {
+                if ($window['status'] === 'before') {
+                    return $this->unprocessable('Exam has not started yet.');
+                }
+                if ($window['status'] === 'after') {
+                    return $this->unprocessable('Exam window has ended; no new attempts can be started.');
+                }
+                if ($window['status'] === 'gap') {
+                    return $this->unprocessable('Exam is not currently in session.');
                 }
             }
 
@@ -388,6 +405,82 @@ class StudentExamAttemptController extends Controller
             $attempt->status = ExamAttempt::STATUS_EXPIRED;
             $attempt->save();
         }
+    }
+
+    /**
+     * Phase 2E server-side execution window gate.
+     *
+     * Returns null when the exam has no schedule (legacy exam -> status-only
+     * rule preserved), otherwise one of:
+     *   open     -> now is inside at least one window (attempt may start)
+     *   before   -> now is earlier than every window
+     *   after    -> now is past every window
+     *   gap      -> now sits between windows
+     *
+     * A participant bound to a specific schedule (exam_participants.schedule_id)
+     * is evaluated against that schedule only; otherwise every schedule of the
+     * exam is considered. Server time only (now()).
+     */
+    private function executionWindowState(ExamParticipant $participant): ?array
+    {
+        $query = ExamSchedule::with('session')->where('exam_id', $participant->exam_id);
+        if ($participant->schedule_id !== null) {
+            $query->where('id', $participant->schedule_id);
+        }
+        $schedules = $query->get();
+
+        if ($schedules->isEmpty()) {
+            return null;
+        }
+
+        $now = now();
+        $starts = [];
+        $ends = [];
+
+        foreach ($schedules as $schedule) {
+            [$start, $end] = $this->scheduleWindow($schedule);
+            if ($now >= $start && $now < $end) {
+                return ['status' => 'open'];
+            }
+            $starts[] = $start;
+            $ends[] = $end;
+        }
+
+        if ($now < min($starts)) {
+            return ['status' => 'before'];
+        }
+
+        if ($now >= max($ends)) {
+            return ['status' => 'after'];
+        }
+
+        return ['status' => 'gap'];
+    }
+
+    /**
+     * Resolve a schedule's execution window. Explicit start_datetime/end_datetime
+     * are authoritative when present; legacy schedules fall back to
+     * exam_date + session.start_time/end_time.
+     */
+    private function scheduleWindow(ExamSchedule $schedule): array
+    {
+        $date = $schedule->exam_date instanceof \DateTimeInterface
+            ? Carbon::parse($schedule->exam_date->format('Y-m-d'))
+            : Carbon::parse((string) $schedule->exam_date);
+
+        if ($schedule->start_datetime !== null) {
+            $start = Carbon::parse($schedule->start_datetime->format('Y-m-d H:i:s'));
+        } else {
+            $start = $date->copy()->setTimeFromTimeString((string) ($schedule->session?->start_time ?? '00:00:00'));
+        }
+
+        if ($schedule->end_datetime !== null) {
+            $end = Carbon::parse($schedule->end_datetime->format('Y-m-d H:i:s'));
+        } else {
+            $end = $date->copy()->setTimeFromTimeString((string) ($schedule->session?->end_time ?? '23:59:59'));
+        }
+
+        return [$start, $end];
     }
 
     private function buildQuestionOrder(Exam $exam): array

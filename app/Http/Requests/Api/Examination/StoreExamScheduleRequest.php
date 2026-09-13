@@ -36,6 +36,14 @@ class StoreExamScheduleRequest extends FormRequest
                 'required',
                 'date',
             ],
+            'start_datetime' => [
+                'nullable',
+                'date',
+            ],
+            'end_datetime' => [
+                'nullable',
+                'date',
+            ],
         ];
     }
 

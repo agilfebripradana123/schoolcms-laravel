@@ -15,6 +15,9 @@ class ExamSchedule extends Model
         'room_id',
         'session_id',
         'exam_date',
+        'supervisor_id',
+        'start_datetime',
+        'end_datetime',
     ];
 
     protected function casts(): array
@@ -24,6 +27,9 @@ class ExamSchedule extends Model
             'room_id' => 'integer',
             'session_id' => 'integer',
             'exam_date' => 'date:Y-m-d',
+            'supervisor_id' => 'integer',
+            'start_datetime' => 'datetime',
+            'end_datetime' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

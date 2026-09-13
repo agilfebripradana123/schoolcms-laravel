@@ -7,10 +7,18 @@ use App\Http\Requests\Api\Examination\StoreExamRequest;
 use App\Http\Requests\Api\Examination\UpdateExamRequest;
 use App\Http\Resources\Examination\ExamResource;
 use App\Models\Examination\Exam;
+use App\Services\Examination\ExamLifecycleService;
 use Illuminate\Http\JsonResponse;
 
 class ExamController extends Controller
 {
+    private ExamLifecycleService $lifecycle;
+
+    public function __construct(ExamLifecycleService $lifecycle)
+    {
+        $this->lifecycle = $lifecycle;
+    }
+
     public function index(\Illuminate\Http\Request $request): JsonResponse
     {
         $query = Exam::query()->with('subject');
@@ -67,7 +75,14 @@ class ExamController extends Controller
 
     public function store(StoreExamRequest $request): JsonResponse
     {
-        $exam = Exam::create($request->validated());
+        $validated = $request->validated();
+
+        // Phase 2E lifecycle: a new exam always starts as `draft`. Publishing is
+        // a validated transition (composition required), so a client-supplied
+        // `status` is never honoured on create.
+        $validated['status'] = 'draft';
+
+        $exam = Exam::create($validated);
 
         return response()->json([
             'success' => true,
@@ -88,7 +103,26 @@ class ExamController extends Controller
             ], 404);
         }
 
-        $exam->update($request->validated());
+        $validated = $request->validated();
+
+        if (array_key_exists('status', $validated) && $validated['status'] !== $exam->status) {
+            $target = $validated['status'];
+
+            if (! $this->lifecycle->isAllowedTransition($exam->status, $target)) {
+                return $this->unprocessable(
+                    sprintf("Transition from '%s' to '%s' is not allowed.", $exam->status, $target)
+                );
+            }
+
+            if ($exam->status === 'draft' && $target === 'published') {
+                $check = $this->lifecycle->validatePublishable($exam);
+                if (! $check['ok']) {
+                    return $this->unprocessable('Exam cannot be published.', $check['errors']);
+                }
+            }
+        }
+
+        $exam->update($validated);
 
         return response()->json([
             'success' => true,
@@ -116,5 +150,15 @@ class ExamController extends Controller
             'message' => 'Exam deleted successfully',
             'data' => null,
         ]);
+    }
+
+    private function unprocessable(string $message, array $errors = []): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'errors' => $errors ?: null,
+            'data' => null,
+        ], 422);
     }
 }

@@ -181,6 +181,24 @@ class ExaminationSecurityBoundaryTest extends TestCase
             $t->dateTime('graded_at')->nullable();
             $t->timestamps();
         });
+        Schema::create('exam_sessions', function (Blueprint $t) {
+            $t->id();
+            $t->string('name');
+            $t->string('start_time');
+            $t->string('end_time');
+            $t->timestamps();
+        });
+        Schema::create('exam_schedules', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('exam_id');
+            $t->unsignedBigInteger('room_id');
+            $t->unsignedBigInteger('session_id');
+            $t->date('exam_date');
+            $t->unsignedBigInteger('supervisor_id')->nullable();
+            $t->dateTime('start_datetime')->nullable();
+            $t->dateTime('end_datetime')->nullable();
+            $t->timestamps();
+        });
         Schema::create('exam_attempts', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('exam_participant_id');

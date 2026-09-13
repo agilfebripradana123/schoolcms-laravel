@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Examination\StoreExamScheduleRequest;
 use App\Http\Requests\Api\Examination\UpdateExamScheduleRequest;
 use App\Http\Resources\Examination\ExamScheduleResource;
+use App\Models\Examination\Exam;
 use App\Models\Examination\ExamSchedule;
 use Illuminate\Http\JsonResponse;
 
@@ -67,7 +68,23 @@ class ExamScheduleController extends Controller
 
     public function store(StoreExamScheduleRequest $request): JsonResponse
     {
-        $schedule = ExamSchedule::create($request->validated());
+        $validated = $request->validated();
+
+        $exam = Exam::find($validated['exam_id']);
+        if (!$exam) {
+            return $this->notFound('Exam not found.');
+        }
+
+        if (! $this->isSchedulable($exam)) {
+            return $this->unprocessable(sprintf("Exam with status '%s' cannot be scheduled.", $exam->status));
+        }
+
+        $check = $this->validateWindow($validated);
+        if (! $check['ok']) {
+            return $this->unprocessable($check['message']);
+        }
+
+        $schedule = ExamSchedule::create($validated);
 
         return response()->json([
             'success' => true,
@@ -81,11 +98,16 @@ class ExamScheduleController extends Controller
         $schedule = ExamSchedule::find($id);
 
         if (!$schedule) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Exam schedule not found',
-                'data' => null,
-            ], 404);
+            return $this->notFound('Exam schedule not found.');
+        }
+
+        if (! $this->isSchedulable($schedule->exam)) {
+            return $this->unprocessable(sprintf("Exam with status '%s' cannot be rescheduled.", $schedule->exam->status));
+        }
+
+        $check = $this->validateWindow($request->validated());
+        if (! $check['ok']) {
+            return $this->unprocessable($check['message']);
         }
 
         $schedule->update($request->validated());
@@ -102,11 +124,11 @@ class ExamScheduleController extends Controller
         $schedule = ExamSchedule::find($id);
 
         if (!$schedule) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Exam schedule not found',
-                'data' => null,
-            ], 404);
+            return $this->notFound('Exam schedule not found.');
+        }
+
+        if (! $this->isSchedulable($schedule->exam)) {
+            return $this->unprocessable(sprintf("Exam with status '%s' cannot have its schedule removed.", $schedule->exam->status));
         }
 
         $schedule->delete();
@@ -116,5 +138,57 @@ class ExamScheduleController extends Controller
             'message' => 'Exam schedule deleted successfully',
             'data' => null,
         ]);
+    }
+
+    /**
+     * A schedule may only be created/updated/removed while the exam is still
+     * draft or published. Once an exam is running (ongoing) or finished
+     * (completed/archived) its execution window is historical.
+     */
+    private function isSchedulable(Exam $exam): bool
+    {
+        return in_array($exam->status, ['draft', 'published'], true);
+    }
+
+    /**
+     * Explicit window datetimes are authoritative when provided; both must be
+     * present together and end must be strictly after start.
+     */
+    private function validateWindow(array $validated): array
+    {
+        $start = $validated['start_datetime'] ?? null;
+        $end = $validated['end_datetime'] ?? null;
+
+        if ($start === null && $end === null) {
+            return ['ok' => true, 'message' => ''];
+        }
+
+        if ($start === null || $end === null) {
+            return ['ok' => false, 'message' => 'start_datetime and end_datetime must be provided together.'];
+        }
+
+        if (strtotime($end) <= strtotime($start)) {
+            return ['ok' => false, 'message' => 'end_datetime must be after start_datetime.'];
+        }
+
+        return ['ok' => true, 'message' => ''];
+    }
+
+    private function notFound(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'data' => null,
+        ], 404);
+    }
+
+    private function unprocessable(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'data' => null,
+        ], 422);
     }
 }
