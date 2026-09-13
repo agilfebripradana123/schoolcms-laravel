@@ -37,11 +37,21 @@ class UpdateExamParticipantRequest extends FormRequest
                 Rule::unique('exam_participants', 'exam_card_number')
                     ->ignore($this->route('exam_participant')),
             ],
+            'schedule_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('exam_schedules', 'id'),
+            ],
             'status' => [
                 'sometimes',
                 'required',
                 'string',
                 Rule::in(['registered', 'started', 'completed', 'blocked']),
+            ],
+            'attendance' => [
+                'nullable',
+                'string',
+                Rule::in(['pending', 'present', 'absent', 'excused']),
             ],
             'started_at' => [
                 'nullable',

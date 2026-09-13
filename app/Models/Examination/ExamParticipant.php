@@ -15,8 +15,10 @@ class ExamParticipant extends Model
     protected $fillable = [
         'exam_id',
         'student_id',
+        'schedule_id',
         'exam_card_number',
         'status',
+        'attendance',
         'started_at',
         'completed_at',
         'is_blocked',
@@ -32,6 +34,7 @@ class ExamParticipant extends Model
         return [
             'is_blocked' => 'boolean',
             'login_allowed' => 'boolean',
+            'schedule_id' => 'integer',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
             'last_activity_at' => 'datetime',

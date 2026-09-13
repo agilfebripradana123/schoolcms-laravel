@@ -430,7 +430,15 @@ class StudentExamAttemptController extends Controller
         $schedules = $query->get();
 
         if ($schedules->isEmpty()) {
-            return null;
+            // Legacy exam (no schedule at all) -> status-only rule, no window gate.
+            if ($participant->schedule_id === null) {
+                return null;
+            }
+
+            // The participant is bound to a specific schedule that does not
+            // belong to this exam (stale/invalid binding). Phase 2F: deny
+            // rather than silently opening the window.
+            return ['status' => 'before'];
         }
 
         $now = now();

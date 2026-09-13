@@ -33,10 +33,20 @@ class StoreExamParticipantRequest extends FormRequest
                 'max:30',
                 Rule::unique('exam_participants', 'exam_card_number'),
             ],
+            'schedule_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('exam_schedules', 'id'),
+            ],
             'status' => [
                 'required',
                 'string',
                 Rule::in(['registered', 'started', 'completed', 'blocked']),
+            ],
+            'attendance' => [
+                'nullable',
+                'string',
+                Rule::in(['pending', 'present', 'absent', 'excused']),
             ],
             'started_at' => [
                 'nullable',
