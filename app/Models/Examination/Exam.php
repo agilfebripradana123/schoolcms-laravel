@@ -7,6 +7,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+use App\Models\Academic\AcademicYear;
+use App\Models\Academic\SchoolClass;
+use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
 class Exam extends Model
 {
@@ -16,8 +19,14 @@ class Exam extends Model
 
     protected $fillable = [
         'subject_id',
+        'class_id',
+        'academic_year_id',
+        'semester_id',
+        'teacher_id',
+        'exam_type',
         'title',
         'description',
+        'instructions',
         'duration_minutes',
         'total_questions',
         'passing_score',
@@ -25,6 +34,7 @@ class Exam extends Model
         'shuffle_questions',
         'shuffle_options',
         'show_result',
+        'config_snapshot',
         'status',
     ];
 
@@ -32,6 +42,10 @@ class Exam extends Model
     {
         return [
             'subject_id' => 'integer',
+            'class_id' => 'integer',
+            'academic_year_id' => 'integer',
+            'semester_id' => 'integer',
+            'teacher_id' => 'integer',
             'duration_minutes' => 'integer',
             'total_questions' => 'integer',
             'passing_score' => 'integer',
@@ -39,6 +53,7 @@ class Exam extends Model
             'shuffle_questions' => 'boolean',
             'shuffle_options' => 'boolean',
             'show_result' => 'boolean',
+            'config_snapshot' => 'array',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'deleted_at' => 'datetime',
@@ -48,6 +63,21 @@ class Exam extends Model
     public function subject(): BelongsTo
     {
         return $this->belongsTo(Subject::class, 'subject_id');
+    }
+
+    public function schoolClass(): BelongsTo
+    {
+        return $this->belongsTo(SchoolClass::class, 'class_id');
+    }
+
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function semester(): BelongsTo
+    {
+        return $this->belongsTo(Semester::class, 'semester_id');
     }
 
     public function schedules(): HasMany

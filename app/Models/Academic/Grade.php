@@ -20,12 +20,15 @@ class Grade extends Model
         'academic_year',
         'semester_id',
         'academic_year_id',
+        'source_type',
+        'source_id',
     ];
 
     protected function casts(): array
     {
         return [
             'score' => 'decimal:2',
+            'source_id' => 'integer',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

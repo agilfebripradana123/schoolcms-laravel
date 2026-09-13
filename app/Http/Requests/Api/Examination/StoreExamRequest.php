@@ -22,6 +22,26 @@ class StoreExamRequest extends FormRequest
                 'integer',
                 Rule::exists('subjects', 'id'),
             ],
+            'class_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('classes', 'id')->whereNull('deleted_at'),
+            ],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')->whereNull('deleted_at'),
+            ],
+            'semester_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('semesters', 'id'),
+            ],
+            'exam_type' => [
+                'nullable',
+                'string',
+                Rule::in(['formatif', 'sumatif', 'uts', 'uas', 'ujian_sekolah', 'remedial', 'other']),
+            ],
             'title' => [
                 'required',
                 'string',

@@ -247,6 +247,19 @@ class ExamScoringAndEssayGradingTest extends TestCase
             $t->dateTime('graded_at')->nullable();
             $t->timestamps();
         });
+        Schema::create('grades', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id')->nullable();
+            $t->unsignedBigInteger('subject_id')->nullable();
+            $t->unsignedBigInteger('class_id')->nullable();
+            $t->string('type', 10)->nullable();
+            $t->decimal('score', 5, 2)->nullable();
+            $t->unsignedBigInteger('semester_id')->nullable();
+            $t->unsignedBigInteger('academic_year_id')->nullable();
+            $t->string('source_type', 50)->nullable();
+            $t->unsignedBigInteger('source_id')->nullable();
+            $t->timestamps();
+        });
     }
 
     private function seedFixture(): void

@@ -7,6 +7,7 @@ use App\Http\Requests\Api\Examination\StoreExamResultRequest;
 use App\Http\Requests\Api\Examination\UpdateExamResultRequest;
 use App\Http\Resources\Examination\ExamResultResource;
 use App\Models\Examination\ExamResult;
+use App\Services\Examination\ExamGradeIntegrationService;
 use Illuminate\Http\JsonResponse;
 
 class ExamResultController extends Controller
@@ -109,6 +110,43 @@ class ExamResultController extends Controller
             'success' => true,
             'message' => 'Exam result deleted successfully',
             'data' => null,
+        ]);
+    }
+
+    /**
+     * POST /api/exam-results/{exam_result}/grade-sync   (admin, manage-exams)
+     * Synchronize an eligible examination result into the Academic Grade.
+     * Academic identity is 100% server-derived; the request accepts no body.
+     */
+    public function syncToGrade(int $id): JsonResponse
+    {
+        $result = ExamResult::with(['participant', 'participant.student'])->find($id);
+
+        if (!$result) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Exam result not found',
+                'data' => null,
+            ], 404);
+        }
+
+        $outcome = app(ExamGradeIntegrationService::class)->sync($result);
+
+        if (! $outcome['ok']) {
+            return response()->json([
+                'success' => false,
+                'message' => $outcome['message'],
+                'data' => null,
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $outcome['message'],
+            'data' => [
+                'grade_id' => $outcome['grade']->id,
+                'grade' => $outcome['grade'],
+            ],
         ]);
     }
 }

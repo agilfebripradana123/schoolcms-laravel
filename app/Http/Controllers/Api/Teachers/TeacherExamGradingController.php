@@ -8,6 +8,7 @@ use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Staff\TeacherAssignment;
+use App\Services\Examination\ExamGradeIntegrationService;
 use App\Services\Examination\ExamScoringService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -136,6 +137,14 @@ class TeacherExamGradingController extends Controller
         // Recompute the participant result from the snapshot (idempotent).
         $result = app(ExamScoringService::class)->scoreAttempt($attempt);
 
+        // Regrade propagation: if this result was already synchronized into the
+        // academic Grade, re-sync so the academic value never goes stale.
+        $resultRow = \App\Models\Examination\ExamResult::where('participant_id', $attempt->exam_participant_id)->first();
+        $gradeIntegration = app(ExamGradeIntegrationService::class);
+        if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
+            $gradeIntegration->sync($resultRow);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Essay answer graded successfully',
@@ -147,6 +156,45 @@ class TeacherExamGradingController extends Controller
                 'graded_by' => $answer->graded_by,
                 'graded_at' => $answer->graded_at?->toISOString(),
                 'result' => $result,
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/teacher/exam-grading/results/{result}/grade-sync
+     * Teacher-scoped explicit synchronization of an eligible result into the
+     * Academic Grade. Server-derived identity; no request body.
+     */
+    public function syncGrade(Request $request, int $result): JsonResponse
+    {
+        $teacher = $this->teacher($request);
+        if (! $teacher) {
+            return $this->forbidden();
+        }
+
+        $subjectIds = $this->subjectIds($teacher->id);
+
+        $resultRow = \App\Models\Examination\ExamResult::with(['participant'])
+            ->where('id', $result)
+            ->whereHas('participant.exam', fn ($q) => $q->whereIn('subject_id', $subjectIds))
+            ->first();
+
+        if (! $resultRow) {
+            return $this->notFound('Exam result not found.');
+        }
+
+        $outcome = app(ExamGradeIntegrationService::class)->sync($resultRow);
+
+        if (! $outcome['ok']) {
+            return $this->unprocessable($outcome['message']);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $outcome['message'],
+            'data' => [
+                'grade_id' => $outcome['grade']->id,
+                'grade' => $outcome['grade'],
             ],
         ]);
     }

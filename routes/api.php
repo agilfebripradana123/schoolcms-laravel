@@ -449,6 +449,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/exam-results/{exam_result}', [ExamResultController::class, 'update']);
         Route::patch('/exam-results/{exam_result}', [ExamResultController::class, 'update']);
         Route::delete('/exam-results/{exam_result}', [ExamResultController::class, 'destroy']);
+        Route::post('/exam-results/{exam_result}/grade-sync', [ExamResultController::class, 'syncToGrade']);
     });
 
 
@@ -1179,6 +1180,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/exam-grading/attempts/{attempt}', [TeacherExamGradingController::class, 'show'])
             ->middleware('permission:view-exam-results');
         Route::put('/exam-grading/answers/{examAnswer}', [TeacherExamGradingController::class, 'grade'])
+            ->middleware('permission:view-exam-results');
+        Route::post('/exam-grading/results/{result}/grade-sync', [TeacherExamGradingController::class, 'syncGrade'])
             ->middleware('permission:view-exam-results');
     });
 });
