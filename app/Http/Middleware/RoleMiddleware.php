@@ -10,8 +10,7 @@ class RoleMiddleware
 {
     public function handle(Request $request, Closure $next, string ...$roles): Response
     {
-        $user = $request->user();
-
+        $user = $request->user()->load('role');
         if (!$user || !$user->role) {
             return response()->json([
                 'success' => false,
@@ -21,7 +20,6 @@ class RoleMiddleware
         }
 
         $allowedRoles = array_map('trim', $roles);
-
         if (!in_array($user->role->name, $allowedRoles)) {
             return response()->json([
                 'success' => false,

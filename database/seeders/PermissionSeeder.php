@@ -46,8 +46,21 @@ class PermissionSeeder extends Seeder
             ['name' => 'manage-teachers', 'description' => 'Mengelola data guru, penugasan, kehadiran, cuti, dan dokumen.'],
             ['name' => 'manage-staff', 'description' => 'Mengelola tenaga kependidikan.'],
 
-            // Students
-            ['name' => 'manage-students', 'description' => 'Mengelola data siswa, kehadiran, orang tua, wali, riwayat, mutasi, alumni, dan kartu pelajar.'],
+             // Students (read-only)
+             ['name' => 'view-grades', 'description' => 'Melihat nilai akademik siswa.'],
+             ['name' => 'view-schedules', 'description' => 'Melihat jadwal pelajaran siswa.'],
+             ['name' => 'view-attendance', 'description' => 'Melihat kehadiran siswa.'],
+             ['name' => 'view-assignments', 'description' => 'Melihat tugas siswa.'],
+             ['name' => 'view-exams', 'description' => 'Melihat ujian siswa.'],
+             ['name' => 'view-finance', 'description' => 'Melihat ringkasan keuangan siswa.'],
+             ['name' => 'view-billings', 'description' => 'Melihat tagihan siswa.'],
+             ['name' => 'view-payments', 'description' => 'Melihat pembayaran siswa.'],
+             ['name' => 'view-transactions', 'description' => 'Melihat transaksi keuangan siswa.'],
+             ['name' => 'view-scholarships', 'description' => 'Melihat beasiswa siswa.'],
+             ['name' => 'view-achievements', 'description' => 'Melihat prestasi siswa.'],
+             ['name' => 'view-violations', 'description' => 'Melihat pelanggaran siswa.'],
+             ['name' => 'view-extracurricular', 'description' => 'Melihat ekstrakurikuler siswa.'],
+
 
             // Finance
             ['name' => 'manage-finance', 'description' => 'Mengelola jenis biaya, tagihan, pembayaran, transaksi, dan laporan keuangan.'],
