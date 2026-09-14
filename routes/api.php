@@ -654,7 +654,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // AUDIT LOGS (read-only, khusus admin)
     // =========================
-    Route::middleware('role:Admin,Administrator')->group(function () {
+    Route::middleware('role:Administrator,Super Admin')->group(function () {
         Route::get('/audit-logs', [AuditLogController::class, 'index']);
         Route::get('/audit-logs/{audit_log}', [AuditLogController::class, 'show']);
     });
@@ -672,7 +672,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // SETTINGS (khusus admin)
     // =========================
-    Route::middleware('role:Admin,Administrator')->group(function () {
+    Route::middleware('role:Administrator,Super Admin')->group(function () {
         Route::get('/settings', [SettingController::class, 'index']);
         Route::get('/settings/{setting}', [SettingController::class, 'show']);
         Route::post('/settings', [SettingController::class, 'store']);

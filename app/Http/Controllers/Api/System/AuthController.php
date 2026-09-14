@@ -21,7 +21,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'login' => ['required', 'string'],
             'password' => ['required', 'string'],
-            'expected_role' => ['nullable', 'string', 'in:siswa,guru,admin,administrator,Siswa,Guru,Admin,Administrator'],
+             'expected_role' => ['nullable', 'string', 'in:siswa,guru,admin,administrator,Super Admin,Siswa,Guru,Admin,Administrator'],
         ]);
 
         $expected = strtolower($validated['expected_role'] ?? '');
@@ -75,7 +75,7 @@ class AuthController extends Controller
         if ($expected !== '') {
             $actual = strtolower($user->role?->name ?? '');
             $isAdminExpected = in_array($expected, ['admin', 'administrator'], true);
-            $isAdminActual = in_array($actual, ['admin', 'administrator'], true);
+            $isAdminActual = in_array($actual, ['admin', 'administrator', 'super admin'], true);
             $matches = ($actual === $expected) || ($isAdminExpected && $isAdminActual);
             if (!$matches) {
                 return response()->json([

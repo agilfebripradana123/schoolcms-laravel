@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class RoleController extends Controller
 {
-    private const SYSTEM_ROLES = ['Admin', 'Administrator'];
+    private const SYSTEM_ROLES = ['Admin', 'Administrator', 'Super Admin'];
 
     public function index(\Illuminate\Http\Request $request): JsonResponse
     {
@@ -22,7 +22,6 @@ class RoleController extends Controller
             'per_page' => 'nullable|integer|min:1|max:100',
             'page' => 'nullable|integer|min:1',
         ]);
-
         $query = Role::query()->with('permissions');
 
         if (!empty($validated['search'])) {
@@ -179,6 +178,14 @@ class RoleController extends Controller
                 'message' => 'Role not found',
                 'data' => null,
             ], 404);
+        }
+
+        if (in_array($role->name, self::SYSTEM_ROLES, true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'System role cannot be modified',
+                'data' => null,
+            ], 403);
         }
 
         $validated = $request->validated();
