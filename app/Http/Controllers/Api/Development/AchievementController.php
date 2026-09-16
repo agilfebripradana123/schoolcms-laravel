@@ -7,10 +7,20 @@ use App\Http\Requests\Api\Development\StoreAchievementRequest;
 use App\Http\Requests\Api\Development\UpdateAchievementRequest;
 use App\Http\Resources\Development\AchievementResource;
 use App\Models\Development\Achievement;
+use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AchievementController extends Controller
 {
+    private function classIds(Request $request)
+    {
+        $teacher = $request->user()?->teacherProfile;
+        return $teacher
+            ? TeacherAssignment::where('teacher_id', $teacher->id)->pluck('class_id')->unique()->filter()
+            : collect();
+    }
+
     public function index(\Illuminate\Http\Request $request): JsonResponse
     {
         $query = Achievement::query()->with('student');
@@ -109,6 +119,45 @@ class AchievementController extends Controller
             'success' => true,
             'message' => 'Achievement deleted successfully',
             'data' => null,
+        ]);
+    }
+
+    public function myAchievements(Request $request): JsonResponse
+    {
+        $classIds = $this->classIds($request);
+
+        if ($classIds->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Forbidden',
+                'data' => null,
+            ], 403);
+        }
+
+        $query = Achievement::query()
+            ->with('student')
+            ->whereHas('student', fn($q) => $q->whereIn('class_id', $classIds));
+
+        if ($request->filled('student_id')) {
+            $query->where('student_id', $request->input('student_id'));
+        }
+
+        if ($request->filled('level')) {
+            $query->where('level', $request->input('level'));
+        }
+
+        $achievements = $query->orderBy('achievement_date', 'desc')->paginate($request->input('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Achievements retrieved successfully',
+            'data' => AchievementResource::collection($achievements),
+            'meta' => [
+                'current_page' => $achievements->currentPage(),
+                'per_page' => $achievements->perPage(),
+                'total' => $achievements->total(),
+                'last_page' => $achievements->lastPage(),
+            ],
         ]);
     }
 }

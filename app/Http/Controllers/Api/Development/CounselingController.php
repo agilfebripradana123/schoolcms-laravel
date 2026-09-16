@@ -7,10 +7,20 @@ use App\Http\Requests\Api\Development\StoreCounselingRequest;
 use App\Http\Requests\Api\Development\UpdateCounselingRequest;
 use App\Http\Resources\Development\CounselingResource;
 use App\Models\Development\Counseling;
+use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class CounselingController extends Controller
 {
+    private function classIds(Request $request)
+    {
+        $teacher = $request->user()?->teacherProfile;
+        return $teacher
+            ? TeacherAssignment::where('teacher_id', $teacher->id)->pluck('class_id')->unique()->filter()
+            : collect();
+    }
+
     public function index(\Illuminate\Http\Request $request): JsonResponse
     {
         $query = Counseling::query()->with(['student', 'counselor']);
@@ -116,6 +126,54 @@ class CounselingController extends Controller
             'success' => true,
             'message' => 'Counseling deleted successfully',
             'data' => null,
+        ]);
+    }
+
+    public function myCounselings(Request $request): JsonResponse
+    {
+        $classIds = $this->classIds($request);
+
+        if ($classIds->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Forbidden',
+                'data' => null,
+            ], 403);
+        }
+
+        $query = Counseling::query()
+            ->with(['student', 'counselor'])
+            ->whereHas('student', fn($q) => $q->whereIn('class_id', $classIds));
+
+        if ($request->filled('student_id')) {
+            $query->where('student_id', $request->input('student_id'));
+        }
+
+        if ($request->filled('counselor_id')) {
+            $query->where('counselor_id', $request->input('counselor_id'));
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('q')) {
+            $q = $request->input('q');
+            $query->where('topic', 'LIKE', "%{$q}%");
+        }
+
+        $counselings = $query->orderBy('counseling_date', 'desc')->paginate($request->input('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Counselings retrieved successfully',
+            'data' => CounselingResource::collection($counselings),
+            'meta' => [
+                'current_page' => $counselings->currentPage(),
+                'per_page' => $counselings->perPage(),
+                'total' => $counselings->total(),
+                'last_page' => $counselings->lastPage(),
+            ],
         ]);
     }
 }

@@ -113,4 +113,38 @@ class AdministrationDocumentController extends Controller
             'data' => null,
         ]);
     }
+
+    /**
+     * Teacher portal: all administration documents (shared, no ownership).
+     */
+    public function myDocuments(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $query = Document::query();
+
+        if ($request->filled('q')) {
+            $q = $request->input('q');
+            $query->where(function ($sub) use ($q) {
+                $sub->where('title', 'LIKE', "%{$q}%")
+                    ->orWhere('document_number', 'LIKE', "%{$q}%");
+            });
+        }
+
+        if ($request->filled('category')) {
+            $query->where('category', $request->input('category'));
+        }
+
+        $documents = $query->orderBy('id', 'desc')->paginate($request->input('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Documents retrieved successfully',
+            'data' => DocumentResource::collection($documents),
+            'meta' => [
+                'current_page' => $documents->currentPage(),
+                'per_page' => $documents->perPage(),
+                'total' => $documents->total(),
+                'last_page' => $documents->lastPage(),
+            ],
+        ]);
+    }
 }

@@ -118,4 +118,43 @@ class OutgoingLetterController extends Controller
             'data' => null,
         ]);
     }
+
+    /**
+     * Teacher portal: all outgoing letters (teachers see all outgoing).
+     */
+    public function myLetters(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $query = OutgoingLetter::query();
+
+        if ($request->filled('q')) {
+            $q = $request->input('q');
+            $query->where(function ($sub) use ($q) {
+                $sub->where('letter_number', 'LIKE', "%{$q}%")
+                    ->orWhere('recipient', 'LIKE', "%{$q}%")
+                    ->orWhere('subject', 'LIKE', "%{$q}%");
+            });
+        }
+
+        if ($request->filled('category')) {
+            $query->where('category', $request->input('category'));
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->input('status'));
+        }
+
+        $letters = $query->orderBy('id', 'desc')->paginate($request->input('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Outgoing letters retrieved successfully',
+            'data' => OutgoingLetterResource::collection($letters),
+            'meta' => [
+                'current_page' => $letters->currentPage(),
+                'per_page' => $letters->perPage(),
+                'total' => $letters->total(),
+                'last_page' => $letters->lastPage(),
+            ],
+        ]);
+    }
 }

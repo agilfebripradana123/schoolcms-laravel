@@ -108,4 +108,20 @@ class AnnouncementController extends Controller
             'data' => null,
         ]);
     }
+
+    /**
+     * Teacher portal: announcements for teachers (guru + umum).
+     */
+    public function myAnnouncements()
+    {
+        $announcements = Announcement::whereIn('category', ['guru', 'umum'])
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Announcements retrieved successfully',
+            'data' => AnnouncementResource::collection($announcements),
+        ]);
+    }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Students;
 
 use App\Http\Controllers\Controller;
 use App\Models\Students\Student;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class StudentController extends Controller
@@ -131,5 +132,38 @@ class StudentController extends Controller
         return response()->json([
             'message' => 'Siswa berhasil dihapus.',
         ]);
+    }
+
+    /**
+     * GET /api/teacher/my-students
+     * Siswa yang diajar guru (scope via teacher_assignments).
+     */
+    public function myStudents(Request $request): JsonResponse
+    {
+        $user = $request->user()->load('teacherProfile.teacherAssignments');
+        $teacher = $user->teacherProfile;
+
+        if (!$teacher) {
+            return response()->json(['success' => true, 'message' => 'Data ditemukan', 'data' => []], 200);
+        }
+
+        $classIds = $teacher->teacherAssignments->pluck('class_id')->unique()->filter();
+
+        $students = Student::whereIn('class_id', $classIds)
+            ->with(['user', 'schoolClass'])
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Data ditemukan',
+            'data' => $students->map(fn($s) => [
+                'id' => $s->id,
+                'nis' => $s->nis,
+                'name' => $s->user?->name ?? $s->name,
+                'email' => $s->user?->email,
+                'class_name' => $s->schoolClass?->name,
+            ]),
+        ], 200);
     }
 }
