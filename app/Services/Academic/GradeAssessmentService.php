@@ -150,9 +150,6 @@ class GradeAssessmentService
         if (isset($validated['weight'])) {
             $data['weight'] = $validated['weight'];
         }
-        if (isset($validated['assessment_name'])) {
-            $data['assessment_name'] = $validated['assessment_name'];
-        }
         if (isset($validated['notes'])) {
             $data['notes'] = $validated['notes'];
         }
@@ -174,59 +171,5 @@ class GradeAssessmentService
     public function delete(GradeAssessment $assessment): bool
     {
         return $assessment->delete();
-    }
-
-    /**
-     * Validate assessment identity and consistency.
-     *
-     * @param array $input
-     * @return array['valid' => bool, 'errors' => array]
-     */
-    public function validateIdentity(array $input): array
-    {
-        $studentId = $input['student_id'] ?? null;
-        $subjectId = $input['subject_id'] ?? null;
-        $classId = $input['class_id'] ?? null;
-        $academicYearId = $input['academic_year_id'] ?? null;
-        $semesterId = $input['semester_id'] ?? null;
-        $category = $input['assessment_category'] ?? null;
-        $sequence = $input['assessment_sequence'] ?? null;
-
-        $errors = [];
-
-        // Validate student exists and has class
-        if ($studentId) {
-            $student = \App\Models\Students\Student::find($studentId);
-            if (!$student) {
-                $errors['student_id'] = ['Siswa tidak ditemukan.'];
-            } elseif ($student->class_id !== $classId) {
-                $errors['student_id'] = ['Siswa tidak terdaftar di kelas ID ' . $classId . '.'];
-            }
-        }
-
-        // Validate subject belongs to class
-        if ($subjectId && $classId) {
-            $classSubject = ClassSubject::where('class_id', $classId)
-                ->where('subject_id', $subjectId)
-                ->exists();
-            if (!$classSubject) {
-                $errors['subject_id'] = ['Mata pelajaran tidak terdaftar pada kelas ID ' . $classId . '.'];
-            }
-        }
-
-        // Validate category
-        if ($category) {
-            $supported = $this->getSupportedCategories();
-            if (!in_array($category, $supported, true)) {
-                $errors['assessment_category'] = ['Kategori penilaian "' . $category . '" tidak didukung.'];
-            }
-        }
-
-        // Validate sequence
-        if ($sequence !== null && ($sequence < 1 || !is_int($sequence))) {
-            $errors['assessment_sequence'] = ['Nomor urut harus minimal 1.'];
-        }
-
-        return ['valid' => empty($errors), 'errors' => $errors];
     }
 }

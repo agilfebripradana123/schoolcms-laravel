@@ -291,6 +291,81 @@ class GradeAssessmentApiTest extends TestCase
         $this->assertSame('90.00', (string) GradeAssessment::find($id)->score);
     }
 
+    public function test_update_all_mutable_fields(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+
+        $response = $this->putJson("/api/grade-assessments/{$id}", [
+            'score' => 77.50,
+            'max_score' => 50.00,
+            'weight' => 30.00,
+            'notes' => 'updated notes',
+            'assessed_date' => '2026-09-10',
+        ]);
+        $response->assertStatus(200);
+
+        $row = GradeAssessment::find($id);
+        $this->assertSame('77.50', (string) $row->score);
+        $this->assertSame('50.00', (string) $row->max_score);
+        $this->assertSame('30.00', (string) $row->weight);
+        $this->assertSame('updated notes', $row->notes);
+        $this->assertNotNull($row->assessed_date);
+    }
+
+    public function test_update_rejects_identity_fields(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $before = GradeAssessment::find($id)->toArray();
+
+        $identityFields = [
+            'student_id' => $this->student2->id,
+            'subject_id' => $this->sub2->id,
+            'class_id' => $this->class2->id,
+            'academic_year_id' => $this->ay2->id,
+            'semester_id' => $this->sem2->id,
+            'assessment_category' => 'uas',
+            'assessment_sequence' => 2,
+        ];
+
+        foreach ($identityFields as $field => $value) {
+            $response = $this->putJson("/api/grade-assessments/{$id}", [$field => $value]);
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors([$field]);
+
+            // Identity must remain completely unchanged after rejection.
+            $after = GradeAssessment::find($id)->toArray();
+            $this->assertSame($before['student_id'], $after['student_id']);
+            $this->assertSame($before['subject_id'], $after['subject_id']);
+            $this->assertSame($before['class_id'], $after['class_id']);
+            $this->assertSame($before['academic_year_id'], $after['academic_year_id']);
+            $this->assertSame($before['semester_id'], $after['semester_id']);
+            $this->assertSame($before['assessment_category'], $after['assessment_category']);
+            $this->assertSame($before['assessment_sequence'], $after['assessment_sequence']);
+        }
+    }
+
+    public function test_update_rejects_identity_field_without_touching_mutable_field(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+
+        // Identity mutation PLUS valid mutable field must fail as a whole.
+        $response = $this->putJson("/api/grade-assessments/{$id}", [
+            'student_id' => $this->student2->id,
+            'score' => 60.00,
+        ]);
+        $response->assertStatus(422);
+
+        $row = GradeAssessment::find($id);
+        $this->assertSame($this->student1->id, $row->student_id, 'student_id must not change');
+        $this->assertSame('85.00', (string) $row->score, 'score must not be persisted when identity mutation is rejected');
+    }
+
     public function test_delete_assessment(): void
     {
         $this->authenticateAdmin();
