@@ -1183,5 +1183,152 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:view-exam-results');
         Route::post('/exam-grading/results/{result}/grade-sync', [TeacherExamGradingController::class, 'syncGrade'])
             ->middleware('permission:view-exam-results');
+
+        // Portal Guru: Teachers (manage-teachers permission)
+        Route::middleware('permission:manage-teachers')->group(function () {
+            Route::get('/teachers', [TeacherController::class, 'index']);
+            Route::get('/teachers/{teacher}', [TeacherController::class, 'show']);
+            Route::post('/teachers', [TeacherController::class, 'store']);
+            Route::put('/teachers/{teacher}', [TeacherController::class, 'update']);
+            Route::patch('/teachers/{teacher}', [TeacherController::class, 'update']);
+            Route::delete('/teachers/{teacher}', [TeacherController::class, 'destroy']);
+        });
+
+        // Portal Guru: Staff
+        Route::middleware('permission:manage-staff')->group(function () {
+            Route::get('/staff', [StaffController::class, 'index']);
+            Route::get('/staff/{staff}', [StaffController::class, 'show']);
+            Route::post('/staff', [StaffController::class, 'store']);
+            Route::put('/staff/{staff}', [StaffController::class, 'update']);
+            Route::patch('/staff/{staff}', [StaffController::class, 'update']);
+            Route::delete('/staff/{staff}', [StaffController::class, 'destroy']);
+        });
+
+        // Portal Guru: Exams
+        Route::middleware('permission:manage-exams')->group(function () {
+            Route::get('/exams/questions', [QuestionController::class, 'index']);
+            Route::get('/exams/results', [ExamResultController::class, 'index']);
+        });
+
+        // Portal Guru: Development
+        Route::middleware('permission:manage-development')->group(function () {
+            Route::get('/development/achievements', [AchievementController::class, 'myAchievements']);
+            Route::get('/development/violations', [ViolationController::class, 'myViolations']);
+            Route::get('/development/counselings', [CounselingController::class, 'myCounselings']);
+            Route::get('/development/extracurriculars', [ExtracurricularController::class, 'myExtracurriculars']);
+        });
+
+        // Portal Guru: Announcements
+        Route::middleware('permission:manage-announcements')->group(function () {
+            Route::get('/announcements', [AnnouncementController::class, 'myAnnouncements']);
+        });
+
+        // Portal Guru: Calendars
+        Route::middleware('permission:manage-calendars')->group(function () {
+            Route::get('/calendars', [CalendarController::class, 'myCalendars']);
+        });
+
+        // Portal Guru: Letters
+        Route::middleware('permission:manage-letters')->group(function () {
+            Route::get('/letters/incoming', [IncomingLetterController::class, 'myLetters']);
+            Route::get('/letters/outgoing', [OutgoingLetterController::class, 'myLetters']);
+        });
+
+        // Portal Guru: Documents
+        Route::middleware('permission:manage-documents')->group(function () {
+            Route::get('/documents', [AdministrationDocumentController::class, 'myDocuments']);
+        });
+
+        // Portal Guru: Notifications
+        Route::middleware('permission:manage-notifications')->group(function () {
+            Route::get('/notifications/my', [UserNotificationController::class, 'my']);
+            Route::get('/notifications/unread-count', [UserNotificationController::class, 'unreadCount']);
+        });
+
+        // Portal Guru: Reports
+        Route::middleware('permission:view-reports')->group(function () {
+            Route::get('/reports/academic', [AcademicReportController::class, 'index']);
+            Route::get('/reports/students', [StudentReportController::class, 'index']);
+            Route::get('/reports/teachers', [TeacherReportController::class, 'index']);
+            Route::get('/reports/finance', [FinancialReportController::class, 'index']);
+            Route::get('/reports/attendance', [AttendanceReportController::class, 'index']);
+            Route::get('/reports/inventory', [InventoryReportController::class, 'index']);
+        });
+
+        // Portal Guru: Students
+        Route::middleware('permission:manage-students')->group(function () {
+            Route::get('/my-students', [\App\Http\Controllers\Api\Students\StudentController::class, 'myStudents']);
+            Route::get('/students', [\App\Http\Controllers\Api\Students\StudentController::class, 'index']);
+            Route::get('/students/{student}', [\App\Http\Controllers\Api\Students\StudentController::class, 'show']);
+            Route::post('/students', [\App\Http\Controllers\Api\Students\StudentController::class, 'store']);
+            Route::put('/students/{student}', [\App\Http\Controllers\Api\Students\StudentController::class, 'update']);
+            Route::patch('/students/{student}', [\App\Http\Controllers\Api\Students\StudentController::class, 'update']);
+            Route::delete('/students/{student}', [\App\Http\Controllers\Api\Students\StudentController::class, 'destroy']);
+        });
+
+        // Portal Guru: View Achievements
+        Route::middleware('permission:view-achievements')->group(function () {
+            Route::get('/achievements', [\App\Http\Controllers\Api\Development\AchievementController::class, 'index']);
+        });
+
+        // Portal Guru: View Violations
+        Route::middleware('permission:view-violations')->group(function () {
+            Route::get('/violations', [\App\Http\Controllers\Api\Development\ViolationController::class, 'index']);
+        });
+
+        // Portal Guru: View Extracurricular
+        Route::middleware('permission:view-extracurricular')->group(function () {
+            Route::get('/extracurriculars', [\App\Http\Controllers\Api\Development\ExtracurricularController::class, 'index']);
+        });
+
+        // Portal Guru: PPDB
+        Route::middleware('permission:manage-ppdb')->group(function () {
+            Route::get('/ppdb/registrations', [\App\Http\Controllers\Api\PPDB\RegistrationController::class, 'index']);
+            Route::get('/ppdb/registrations/{registration}', [\App\Http\Controllers\Api\PPDB\RegistrationController::class, 'show']);
+            Route::post('/ppdb/registrations', [\App\Http\Controllers\Api\PPDB\RegistrationController::class, 'store']);
+            Route::put('/ppdb/registrations/{registration}', [\App\Http\Controllers\Api\PPDB\RegistrationController::class, 'update']);
+            Route::patch('/ppdb/registrations/{registration}', [\App\Http\Controllers\Api\PPDB\RegistrationController::class, 'update']);
+            Route::delete('/ppdb/registrations/{registration}', [\App\Http\Controllers\Api\PPDB\RegistrationController::class, 'destroy']);
+        });
+
+        // Portal Guru: Manage Schedules (path /schedules/manage to avoid collision with mySchedules at /schedules)
+        Route::middleware('permission:manage-schedules')->group(function () {
+            Route::get('/schedules/manage', [\App\Http\Controllers\Api\Academic\ScheduleController::class, 'index']);
+            Route::get('/schedules/manage/{schedule}', [\App\Http\Controllers\Api\Academic\ScheduleController::class, 'show']);
+            Route::post('/schedules/manage', [\App\Http\Controllers\Api\Academic\ScheduleController::class, 'store']);
+            Route::put('/schedules/manage/{schedule}', [\App\Http\Controllers\Api\Academic\ScheduleController::class, 'update']);
+            Route::patch('/schedules/manage/{schedule}', [\App\Http\Controllers\Api\Academic\ScheduleController::class, 'update']);
+            Route::delete('/schedules/manage/{schedule}', [\App\Http\Controllers\Api\Academic\ScheduleController::class, 'destroy']);
+        });
+
+         // Portal Guru: Manage Classes (path /classes/manage to avoid collision with myClasses at /classes)
+         Route::middleware('permission:manage-classes')->group(function () {
+             Route::get('/classes/manage', [\App\Http\Controllers\Api\Academic\ClassController::class, 'index']);
+             Route::get('/classes/manage/{class}', [\App\Http\Controllers\Api\Academic\ClassController::class, 'show']);
+             Route::post('/classes/manage', [\App\Http\Controllers\Api\Academic\ClassController::class, 'store']);
+             Route::put('/classes/manage/{class}', [\App\Http\Controllers\Api\Academic\ClassController::class, 'update']);
+             Route::patch('/classes/manage/{class}', [\App\Http\Controllers\Api\Academic\ClassController::class, 'update']);
+             Route::delete('/classes/manage/{class}', [\App\Http\Controllers\Api\Academic\ClassController::class, 'destroy']);
+         });
+
+        // Portal Guru: Manage Subjects
+        Route::middleware('permission:manage-subjects')->group(function () {
+            Route::get('/subjects', [\App\Http\Controllers\Api\Academic\SubjectController::class, 'index']);
+            Route::get('/subjects/{subject}', [\App\Http\Controllers\Api\Academic\SubjectController::class, 'show']);
+            Route::post('/subjects', [\App\Http\Controllers\Api\Academic\SubjectController::class, 'store']);
+            Route::put('/subjects/{subject}', [\App\Http\Controllers\Api\Academic\SubjectController::class, 'update']);
+            Route::patch('/subjects/{subject}', [\App\Http\Controllers\Api\Academic\SubjectController::class, 'update']);
+            Route::delete('/subjects/{subject}', [\App\Http\Controllers\Api\Academic\SubjectController::class, 'destroy']);
+        });
+
+        // Portal Guru: Manage Academic Years
+        Route::middleware('permission:manage-academic-years')->group(function () {
+            Route::get('/academic-years', [\App\Http\Controllers\Api\Academic\AcademicYearController::class, 'index']);
+            Route::get('/academic-years/{academicYear}', [\App\Http\Controllers\Api\Academic\AcademicYearController::class, 'show']);
+            Route::post('/academic-years', [\App\Http\Controllers\Api\Academic\AcademicYearController::class, 'store']);
+            Route::put('/academic-years/{academicYear}', [\App\Http\Controllers\Api\Academic\AcademicYearController::class, 'update']);
+            Route::patch('/academic-years/{academicYear}', [\App\Http\Controllers\Api\Academic\AcademicYearController::class, 'update']);
+            Route::delete('/academic-years/{academicYear}', [\App\Http\Controllers\Api\Academic\AcademicYearController::class, 'destroy']);
+        });
     });
 });

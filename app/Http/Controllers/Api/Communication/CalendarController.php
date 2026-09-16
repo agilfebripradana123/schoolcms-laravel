@@ -120,4 +120,41 @@ class CalendarController extends Controller
             'data' => null,
         ]);
     }
+
+    /**
+     * Teacher portal: calendar events for active academic year.
+     */
+    public function myCalendars(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $query = Calendar::query()->with('academicYear');
+
+        // Scope to active academic year if exists
+        $activeYearId = \App\Models\Academic\AcademicYear::where('is_active', true)->value('id');
+        if ($activeYearId) {
+            $query->where('academic_year_id', $activeYearId);
+        }
+
+        if ($request->filled('q')) {
+            $search = $request->input('q');
+            $query->where('title', 'LIKE', "%{$search}%");
+        }
+
+        if ($request->filled('type')) {
+            $query->where('type', $request->input('type'));
+        }
+
+        $events = $query->orderBy('event_date', 'asc')->paginate($request->input('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Calendar events retrieved successfully',
+            'data' => CalendarResource::collection($events),
+            'meta' => [
+                'current_page' => $events->currentPage(),
+                'per_page' => $events->perPage(),
+                'total' => $events->total(),
+                'last_page' => $events->lastPage(),
+            ],
+        ]);
+    }
 }

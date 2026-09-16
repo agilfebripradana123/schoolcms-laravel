@@ -119,12 +119,12 @@ class AuthController extends Controller
      *
      * Matches how ProfileController::userResponse() builds the same payload so
      * the frontend always receives the full effective permission set.
+     * Uses User::effectivePermissions() which merges role + user
+     * permissions + Guru default permissions (GURU_DEFAULT_PERMISSIONS).
      */
     private function userResponse(User $user): array
     {
-        $rolePermissions = $user->role?->permissions?->pluck('name')->all() ?? [];
-        $userPermissions = $user->permissions?->pluck('name')->all() ?? [];
-        $effective = array_values(array_unique(array_merge($rolePermissions, $userPermissions)));
+        $effective = $user->effectivePermissions();
 
         return [
             'id' => $user->id,

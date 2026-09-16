@@ -7,10 +7,20 @@ use App\Http\Requests\Api\Development\StoreViolationRequest;
 use App\Http\Requests\Api\Development\UpdateViolationRequest;
 use App\Http\Resources\Development\ViolationResource;
 use App\Models\Development\Violation;
+use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class ViolationController extends Controller
 {
+    private function classIds(Request $request)
+    {
+        $teacher = $request->user()?->teacherProfile;
+        return $teacher
+            ? TeacherAssignment::where('teacher_id', $teacher->id)->pluck('class_id')->unique()->filter()
+            : collect();
+    }
+
     public function index(\Illuminate\Http\Request $request): JsonResponse
     {
         $query = Violation::query()->with(['student', 'handledBy']);
@@ -113,6 +123,49 @@ class ViolationController extends Controller
             'success' => true,
             'message' => 'Violation deleted successfully',
             'data' => null,
+        ]);
+    }
+
+    public function myViolations(Request $request): JsonResponse
+    {
+        $classIds = $this->classIds($request);
+
+        if ($classIds->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Forbidden',
+                'data' => null,
+            ], 403);
+        }
+
+        $query = Violation::query()
+            ->with(['student', 'handledBy'])
+            ->whereHas('student', fn($q) => $q->whereIn('class_id', $classIds));
+
+        if ($request->filled('student_id')) {
+            $query->where('student_id', $request->input('student_id'));
+        }
+
+        if ($request->filled('category')) {
+            $query->where('category', $request->input('category'));
+        }
+
+        if ($request->filled('handled_by')) {
+            $query->where('handled_by', $request->input('handled_by'));
+        }
+
+        $violations = $query->orderBy('violated_at', 'desc')->paginate($request->input('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Violations retrieved successfully',
+            'data' => ViolationResource::collection($violations),
+            'meta' => [
+                'current_page' => $violations->currentPage(),
+                'per_page' => $violations->perPage(),
+                'total' => $violations->total(),
+                'last_page' => $violations->lastPage(),
+            ],
         ]);
     }
 }
