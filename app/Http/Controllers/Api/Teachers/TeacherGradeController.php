@@ -8,6 +8,7 @@ use App\Models\Academic\ClassStudent;
 use App\Models\Academic\Grade;
 use App\Models\Academic\Semester;
 use App\Models\Staff\TeacherAssignment;
+use App\Services\Academic\GradeMutationGuard;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -258,6 +259,19 @@ class TeacherGradeController extends Controller
 
                 if (!isset($allowedSet[$studentId])) {
                     abort(422, "Siswa #{$studentId} bukan anggota kelas yang diizinkan.");
+                }
+
+                // Phase 2J: a finalized (or published-report-card locked) grade
+                // cannot be overwritten by a bulk upsert.
+                $existing = Grade::where('student_id', $studentId)
+                    ->where('subject_id', $subjectId)
+                    ->where('class_id', $classId)
+                    ->where('type', $type)
+                    ->where('semester_id', $semesterInfo['semester_id'])
+                    ->where('academic_year_id', $year->id)
+                    ->first();
+                if ($existing) {
+                    app(GradeMutationGuard::class)->assertMutable($existing);
                 }
 
                 Grade::updateOrCreate(

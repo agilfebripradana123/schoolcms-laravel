@@ -291,6 +291,20 @@ class ExamGradeIntegrationTest extends TestCase
             $t->unsignedBigInteger('academic_year_id');
             $t->string('source_type', 50)->nullable();
             $t->unsignedBigInteger('source_id')->nullable();
+            $t->boolean('is_final')->default(false);
+            $t->dateTime('finalized_at')->nullable();
+            $t->unsignedBigInteger('finalized_by')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('report_cards', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->text('teacher_notes')->nullable();
+            $t->string('status')->default('draft');
+            $t->dateTime('published_at')->nullable();
             $t->timestamps();
         });
     }

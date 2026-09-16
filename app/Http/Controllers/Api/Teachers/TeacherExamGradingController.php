@@ -138,11 +138,18 @@ class TeacherExamGradingController extends Controller
         $result = app(ExamScoringService::class)->scoreAttempt($attempt);
 
         // Regrade propagation: if this result was already synchronized into the
-        // academic Grade, re-sync so the academic value never goes stale.
+        // academic Grade, re-sync so the academic value never goes stale —
+        // UNLESS the grade is finalized/locked (Grade.is_final stays the
+        // authoritative lock; a locked academic value is never overwritten).
         $resultRow = \App\Models\Examination\ExamResult::where('participant_id', $attempt->exam_participant_id)->first();
         $gradeIntegration = app(ExamGradeIntegrationService::class);
         if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
-            $gradeIntegration->sync($resultRow);
+            $syncedGrade = \App\Models\Academic\Grade::where('source_type', 'exam_result')
+                ->where('source_id', $resultRow->id)
+                ->first();
+            if ($syncedGrade && ! app(\App\Services\Academic\GradeMutationGuard::class)->isLocked($syncedGrade)) {
+                $gradeIntegration->sync($resultRow);
+            }
         }
 
         return response()->json([

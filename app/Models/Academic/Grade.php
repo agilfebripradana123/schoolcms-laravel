@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 use App\Models\Students\Student;
+use App\Models\System\User;
 class Grade extends Model
 {
     protected $table = 'grades';
@@ -22,6 +23,9 @@ class Grade extends Model
         'academic_year_id',
         'source_type',
         'source_id',
+        'is_final',
+        'finalized_at',
+        'finalized_by',
     ];
 
     protected function casts(): array
@@ -29,6 +33,9 @@ class Grade extends Model
         return [
             'score' => 'decimal:2',
             'source_id' => 'integer',
+            'is_final' => 'boolean',
+            'finalized_at' => 'datetime',
+            'finalized_by' => 'integer',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
@@ -57,5 +64,10 @@ class Grade extends Model
     public function semester(): BelongsTo
     {
         return $this->belongsTo(Semester::class, 'semester_id');
+    }
+
+    public function finalizedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'finalized_by');
     }
 }

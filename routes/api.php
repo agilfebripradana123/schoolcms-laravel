@@ -230,6 +230,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/grades/{grade}', [GradeController::class, 'destroy']);
     });
 
+    // Grade finalization (Phase 2J) — allow Admin/Administrator (superuser
+    // bypass) plus any role granted the finalize-grades permission.
+    Route::post('/grades/{grade}/finalize', [GradeController::class, 'finalize'])->middleware('permission:finalize-grades');
+    Route::post('/grades/{grade}/unfinalize', [GradeController::class, 'unfinalize'])->middleware('permission:finalize-grades');
+
         // =========================
     // ANNOUNCEMENTS
     // =========================

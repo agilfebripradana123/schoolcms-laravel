@@ -9,7 +9,10 @@ use App\Http\Resources\Academic\GradeResource;
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\Grade;
 use App\Models\Academic\Semester;
+use App\Services\Academic\GradeFinalizationService;
+use App\Services\Academic\GradeMutationGuard;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -130,6 +133,10 @@ class GradeController extends Controller
             ], 404);
         }
 
+        // Phase 2J: a finalized grade (or one covered by a published report
+        // card) is immutable.
+        app(GradeMutationGuard::class)->assertMutable($grade);
+
         $validated = $request->validated();
 
         if ($request->period() !== null) {
@@ -183,6 +190,8 @@ class GradeController extends Controller
             ], 404);
         }
 
+        app(GradeMutationGuard::class)->assertMutable($grade);
+
         $grade->delete();
 
         return response()->json([
@@ -225,5 +234,58 @@ class GradeController extends Controller
         } elseif (!empty($validated['semester'])) {
             $query->where('semester', $validated['semester']);
         }
+    }
+
+    /**
+     * POST /api/grades/{grade}/finalize
+     * Locks an academic grade. Actor is the authenticated (permission-gated)
+     * user; no client-supplied fields are trusted.
+     */
+    public function finalize(Request $request, int $id): JsonResponse
+    {
+        $grade = Grade::find($id);
+
+        if (!$grade) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Grade not found',
+                'data' => null,
+            ], 404);
+        }
+
+        $grade = app(GradeFinalizationService::class)->finalize($grade, $request->user());
+        $grade->load(['student', 'subject', 'schoolClass']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Grade finalized successfully',
+            'data' => new GradeResource($grade),
+        ]);
+    }
+
+    /**
+     * POST /api/grades/{grade}/unfinalize
+     * Explicitly reverses the lock and clears the finalization stamps.
+     */
+    public function unfinalize(Request $request, int $id): JsonResponse
+    {
+        $grade = Grade::find($id);
+
+        if (!$grade) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Grade not found',
+                'data' => null,
+            ], 404);
+        }
+
+        $grade = app(GradeFinalizationService::class)->unfinalize($grade, $request->user());
+        $grade->load(['student', 'subject', 'schoolClass']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Grade unfinalized successfully',
+            'data' => new GradeResource($grade),
+        ]);
     }
 }

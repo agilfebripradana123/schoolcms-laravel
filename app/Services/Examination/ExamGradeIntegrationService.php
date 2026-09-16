@@ -6,6 +6,7 @@ use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamResult;
+use App\Services\Academic\GradeMutationGuard;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -97,6 +98,19 @@ class ExamGradeIntegrationService
         }
 
         $score = (float) $result->percentage;
+
+        // Phase 2J: never overwrite an already-finalized (or published-report-
+        // card locked) academic Grade for this slot.
+        $existing = Grade::where('student_id', $student->id)
+            ->where('subject_id', $subject->id)
+            ->where('class_id', $classId)
+            ->where('type', $type)
+            ->where('semester_id', $exam->semester_id)
+            ->where('academic_year_id', $exam->academic_year_id)
+            ->first();
+        if ($existing) {
+            app(GradeMutationGuard::class)->assertMutable($existing);
+        }
 
         $grade = DB::transaction(function () use ($result, $student, $subject, $classId, $type, $exam, $score) {
             $grade = Grade::updateOrCreate(

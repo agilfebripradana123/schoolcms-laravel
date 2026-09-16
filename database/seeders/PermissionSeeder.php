@@ -26,6 +26,7 @@ class PermissionSeeder extends Seeder
             ['name' => 'manage-classes', 'description' => 'Mengelola kelas, penugasan siswa, dan penugasan mata pelajaran ke kelas.'],
             ['name' => 'manage-schedules', 'description' => 'Mengelola jadwal pelajaran.'],
             ['name' => 'manage-grades', 'description' => 'Mengelola data penilaian, tugas, periode, dan rapor.'],
+            ['name' => 'finalize-grades', 'description' => 'Mengunci (finalisasi) dan membuka kunci nilai akademik.'],
 
             // Teacher portal — read-only (default untuk role Guru).
             ['name' => 'view-classes', 'description' => 'Melihat kelas yang menjadi scope mengajar guru (Portal Guru).'],
