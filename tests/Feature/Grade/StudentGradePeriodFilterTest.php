@@ -12,6 +12,7 @@ use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\BuildsGradeTestSchema;
 use Tests\TestCase;
 
 /**
@@ -24,6 +25,8 @@ use Tests\TestCase;
  */
 class StudentGradePeriodFilterTest extends TestCase
 {
+    use BuildsGradeTestSchema;
+
     private int $classId;
     private int $subjectId;
     private int $studentId;
@@ -32,24 +35,8 @@ class StudentGradePeriodFilterTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
-
-        $this->app['db']->purge('mysql');
+        $this->buildGradeSchema();
+        $this->seedGradeBaseline();
 
         $this->cleanup();
         $this->setupTestData();
@@ -124,7 +111,9 @@ class StudentGradePeriodFilterTest extends TestCase
 
     private function cleanup(): void
     {
-        DB::table('grades')->where('id', '>', 0)->delete();
+        if (isset($this->studentId) && $this->studentId > 0) {
+            Grade::where('student_id', $this->studentId)->delete();
+        }
         Student::where('nisn', 'like', 'GN-%')->forceDelete();
         Student::where('nis', 'like', 'SN-%')->forceDelete();
         User::where('username', 'like', 'spp_%')->delete();

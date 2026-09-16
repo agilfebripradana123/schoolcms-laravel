@@ -13,10 +13,13 @@ use App\Models\Academic\Subject;
 use App\Models\System\User;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\BuildsGradeTestSchema;
 use Tests\TestCase;
 
 class GradeSecurityAuditTest extends TestCase
 {
+    use BuildsGradeTestSchema;
+
     private int $classId;
     private int $subjectId;
     private int $studentId;
@@ -25,25 +28,8 @@ class GradeSecurityAuditTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
-
-        $this->app['db']->purge('mysql');
-
+        $this->buildGradeSchema();
+        $this->seedGradeBaseline();
         $this->cleanupTestGrades();
         $this->cleanupTestStudents();
         $this->cleanupTestClassSubjects();
@@ -164,9 +150,9 @@ class GradeSecurityAuditTest extends TestCase
 
     private function cleanupTestGrades(): void
     {
-        DB::connection('mysql')->table('grades')
-            ->where('id', '>', 0)
-            ->delete();
+        if (isset($this->studentId) && $this->studentId > 0) {
+            Grade::where('student_id', $this->studentId)->delete();
+        }
     }
 
     private function cleanupTestStudents(): void
@@ -177,9 +163,8 @@ class GradeSecurityAuditTest extends TestCase
 
     private function cleanupTestClassSubjects(): void
     {
-        DB::connection('mysql')->table('class_subjects')
-            ->where('id', '>', 0)
-            ->delete();
+        $classId = $this->classId ?? 0;
+        ClassSubject::where('class_id', $classId)->whereNull('teacher_id')->delete();
     }
 
     // ─── Authentication & Authorization Tests ──────────────────
@@ -635,7 +620,7 @@ class GradeSecurityAuditTest extends TestCase
         $grade = $this->createTestGrade();
         $response = $this->putJson("/api/grades/{$grade->id}", []);
         $response->assertStatus(200);
-        $this->assertDatabaseHas('grades', ['id' => $grade->id], 'mysql');
+        $this->assertDatabaseHas('grades', ['id' => $grade->id]);
     }
 
     // ─── Pagination Security Tests ─────────────────────────────

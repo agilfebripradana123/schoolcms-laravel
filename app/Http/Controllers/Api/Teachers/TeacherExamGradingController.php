@@ -144,9 +144,18 @@ class TeacherExamGradingController extends Controller
         $resultRow = \App\Models\Examination\ExamResult::where('participant_id', $attempt->exam_participant_id)->first();
         $gradeIntegration = app(ExamGradeIntegrationService::class);
         if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
-            $syncedGrade = \App\Models\Academic\Grade::where('source_type', 'exam_result')
+            // Source tracing lives on GradeAssessment; resolve the matching
+            // academic Grade via the assessment identity.
+            $assessment = \App\Models\Academic\GradeAssessment::where('source_type', 'exam_result')
                 ->where('source_id', $resultRow->id)
                 ->first();
+            $syncedGrade = $assessment ? \App\Models\Academic\Grade::where('student_id', $assessment->student_id)
+                ->where('subject_id', $assessment->subject_id)
+                ->where('class_id', $assessment->class_id)
+                ->where('type', $assessment->assessment_category)
+                ->where('semester_id', $assessment->semester_id)
+                ->where('academic_year_id', $assessment->academic_year_id)
+                ->first() : null;
             if ($syncedGrade && ! app(\App\Services\Academic\GradeMutationGuard::class)->isLocked($syncedGrade)) {
                 $gradeIntegration->sync($resultRow);
             }

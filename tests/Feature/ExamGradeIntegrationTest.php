@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
+use App\Models\Academic\GradeAssessment;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
@@ -289,12 +290,33 @@ class ExamGradeIntegrationTest extends TestCase
             $t->string('academic_year', 20)->nullable();
             $t->unsignedBigInteger('semester_id');
             $t->unsignedBigInteger('academic_year_id');
-            $t->string('source_type', 50)->nullable();
-            $t->unsignedBigInteger('source_id')->nullable();
             $t->boolean('is_final')->default(false);
             $t->dateTime('finalized_at')->nullable();
             $t->unsignedBigInteger('finalized_by')->nullable();
             $t->timestamps();
+        });
+        Schema::create('grade_assessments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->string('assessment_category', 50);
+            $t->unsignedInteger('assessment_sequence');
+            $t->string('assessment_name', 100)->nullable();
+            $t->decimal('score', 5, 2);
+            $t->decimal('max_score', 5, 2)->default(100);
+            $t->decimal('weight', 5, 2)->nullable();
+            $t->string('source_type', 50)->nullable();
+            $t->unsignedInteger('source_id')->nullable();
+            $t->date('assessed_date')->nullable();
+            $t->text('notes')->nullable();
+            $t->timestamps();
+            $t->unique(
+                ['student_id', 'subject_id', 'class_id', 'academic_year_id', 'semester_id', 'assessment_category', 'assessment_sequence'],
+                'uq_grade_assessments_cat_seq'
+            );
         });
         Schema::create('report_cards', function (Blueprint $t) {
             $t->id();
@@ -437,7 +459,7 @@ class ExamGradeIntegrationTest extends TestCase
         $adminResponse = $this->adminSync($resultId);
         $adminResponse->assertStatus(200);
 
-        $grade = Grade::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->first();
         $this->assertNotNull($grade);
         $this->assertSame($this->studentA->id, $grade->student_id);
         $this->assertSame($this->examMC->subject_id, $grade->subject_id);
@@ -446,6 +468,19 @@ class ExamGradeIntegrationTest extends TestCase
         $this->assertSame($this->semester->id, $grade->semester_id);
         $this->assertSame($this->ay->id, $grade->academic_year_id);
         $this->assertSame(100.0, (float) $grade->score, 'score = result percentage (server-derived)');
+
+        // Phase 2K source tracing lives on the assessment.
+        $assessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $this->assertNotNull($assessment);
+        $this->assertSame($this->studentA->id, $assessment->student_id);
+        $this->assertSame($this->examMC->subject_id, $assessment->subject_id);
+        $this->assertSame($this->class1->id, $assessment->class_id);
+        $this->assertSame('uts', $assessment->assessment_category);
+        $this->assertSame(1, $assessment->assessment_sequence);
+        $this->assertSame($this->semester->id, $assessment->semester_id);
+        $this->assertSame($this->ay->id, $assessment->academic_year_id);
+        $this->assertSame(100.0, (float) $assessment->score);
+        $this->assertSame($resultId, $assessment->source_id);
     }
 
     public function test_repeated_sync_is_idempotent(): void
@@ -461,7 +496,9 @@ class ExamGradeIntegrationTest extends TestCase
         $this->adminSync($resultId)->assertStatus(200);
 
         $this->assertSame(1, Grade::count(), 'repeated sync never duplicates academic grades');
-        $this->assertSame($resultId, Grade::first()->source_id);
+        $this->assertSame(1, GradeAssessment::count(), 'repeated sync never duplicates assessments');
+        $assessment = GradeAssessment::first();
+        $this->assertSame($resultId, $assessment->source_id);
     }
 
     public function test_client_cannot_inject_academic_identity(): void
@@ -559,7 +596,13 @@ class ExamGradeIntegrationTest extends TestCase
         Sanctum::actingAs($this->teacherA);
         $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(200);
 
-        $grade = Grade::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $assessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $this->assertNotNull($assessment);
+        $grade = Grade::where('student_id', $assessment->student_id)
+            ->where('subject_id', $assessment->subject_id)
+            ->where('class_id', $assessment->class_id)
+            ->where('type', $assessment->assessment_category)
+            ->first();
         $this->assertNotNull($grade);
         $this->assertSame(80.0, (float) $grade->score);
 

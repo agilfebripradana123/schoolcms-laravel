@@ -13,10 +13,13 @@ use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\BuildsGradeTestSchema;
 use Tests\TestCase;
 
 class GradeApiTest extends TestCase
 {
+    use BuildsGradeTestSchema;
+
     private int $classId;
     private int $subjectId;
     private int $studentId;
@@ -26,25 +29,8 @@ class GradeApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
-
-        $this->app['db']->purge('mysql');
-
+        $this->buildGradeSchema();
+        $this->seedGradeBaseline();
         $this->cleanupTestGrades();
         $this->cleanupTestStudents();
         $this->cleanupTestClassSubjects();
@@ -191,9 +177,9 @@ class GradeApiTest extends TestCase
 
     private function cleanupTestGrades(): void
     {
-        DB::connection('mysql')->table('grades')
-            ->where('id', '>', 0)
-            ->delete();
+        if (isset($this->studentId) && $this->studentId > 0) {
+            Grade::where('student_id', $this->studentId)->delete();
+        }
     }
 
     private function cleanupTestStudents(): void
@@ -204,9 +190,9 @@ class GradeApiTest extends TestCase
 
     private function cleanupTestClassSubjects(): void
     {
-        DB::connection('mysql')->table('class_subjects')
-            ->where('id', '>', 0)
-            ->delete();
+        if (isset($this->classSubjectId) && $this->classSubjectId > 0) {
+            ClassSubject::where('id', $this->classSubjectId)->delete();
+        }
     }
 
     // ─── Authentication Tests ──────────────────────────────────
@@ -546,7 +532,7 @@ class GradeApiTest extends TestCase
             'type' => 'tugas',
             'semester' => '1',
             'academic_year' => '2026/2027',
-        ], 'mysql');
+        ]);
     }
 
     public function test_store_returns_eager_loaded_relations(): void
@@ -1136,7 +1122,7 @@ class GradeApiTest extends TestCase
         $this->authenticateAsAdmin();
         $grade = $this->createTestGrade();
         $this->deleteJson("/api/grades/{$grade->id}")->assertStatus(200);
-        $this->assertDatabaseMissing('grades', ['id' => $grade->id], 'mysql');
+        $this->assertDatabaseMissing('grades', ['id' => $grade->id]);
     }
 
     public function test_delete_nonexistent_returns_404(): void
@@ -1153,7 +1139,7 @@ class GradeApiTest extends TestCase
         $this->authenticateAsAdmin();
         $grade = $this->createTestGrade();
         $this->deleteJson("/api/grades/{$grade->id}")->assertStatus(200);
-        $this->assertDatabaseHas('students', ['id' => $this->studentId], 'mysql');
+        $this->assertDatabaseHas('students', ['id' => $this->studentId]);
     }
 
     public function test_delete_preserves_subject(): void
@@ -1161,7 +1147,7 @@ class GradeApiTest extends TestCase
         $this->authenticateAsAdmin();
         $grade = $this->createTestGrade();
         $this->deleteJson("/api/grades/{$grade->id}")->assertStatus(200);
-        $this->assertDatabaseHas('subjects', ['id' => $this->subjectId], 'mysql');
+        $this->assertDatabaseHas('subjects', ['id' => $this->subjectId]);
     }
 
     public function test_delete_preserves_class(): void
@@ -1169,7 +1155,7 @@ class GradeApiTest extends TestCase
         $this->authenticateAsAdmin();
         $grade = $this->createTestGrade();
         $this->deleteJson("/api/grades/{$grade->id}")->assertStatus(200);
-        $this->assertDatabaseHas('classes', ['id' => $this->classId], 'mysql');
+        $this->assertDatabaseHas('classes', ['id' => $this->classId]);
     }
 
     public function test_delete_preserves_class_subject(): void
@@ -1177,7 +1163,7 @@ class GradeApiTest extends TestCase
         $this->authenticateAsAdmin();
         $grade = $this->createTestGrade();
         $this->deleteJson("/api/grades/{$grade->id}")->assertStatus(200);
-        $this->assertDatabaseHas('class_subjects', ['id' => $this->classSubjectId], 'mysql');
+        $this->assertDatabaseHas('class_subjects', ['id' => $this->classSubjectId]);
     }
 
     // ─── IDOR Tests ────────────────────────────────────────────

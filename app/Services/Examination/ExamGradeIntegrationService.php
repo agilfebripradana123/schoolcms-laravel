@@ -4,6 +4,7 @@ namespace App\Services\Examination;
 
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
+use App\Models\Academic\GradeAssessment;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamResult;
 use App\Services\Academic\GradeMutationGuard;
@@ -124,11 +125,32 @@ class ExamGradeIntegrationService
                 ],
                 [
                     'score' => $score,
-                    'source_type' => 'exam_result',
-                    'source_id' => $result->id,
                     // string aliases kept in sync with legacy columns
                     'semester' => $exam->semester?->name ?? null,
                     'academic_year' => $exam->academicYear?->name ?? null,
+                ]
+            );
+
+            // Phase 2K: persist the exam-derived assessment with server-side
+            // source tracing. Idempotent via the assessment unique tuple
+            // (student, subject, class, year, semester, category, sequence).
+            GradeAssessment::updateOrCreate(
+                [
+                    'student_id' => $student->id,
+                    'subject_id' => $subject->id,
+                    'class_id' => $classId,
+                    'academic_year_id' => $exam->academic_year_id,
+                    'semester_id' => $exam->semester_id,
+                    'assessment_category' => $type,
+                    'assessment_sequence' => 1,
+                ],
+                [
+                    'score' => $score,
+                    'max_score' => 100.00,
+                    'source_type' => 'exam_result',
+                    'source_id' => $result->id,
+                    'assessed_date' => $result->updated_at?->toDateString(),
+                    'notes' => 'Synced from ExamResult#' . $result->id,
                 ]
             );
 
@@ -139,12 +161,12 @@ class ExamGradeIntegrationService
     }
 
     /**
-     * True when a Grade row already traces back to this result (used to
+     * True when an assessment already traces back to this result (used to
      * propagate regrades automatically so academic data can never go stale).
      */
     public function isSynced(ExamResult $result): bool
     {
-        return Grade::where('source_type', 'exam_result')
+        return GradeAssessment::where('source_type', 'exam_result')
             ->where('source_id', $result->id)
             ->exists();
     }

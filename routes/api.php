@@ -58,6 +58,7 @@ use App\Http\Controllers\Api\Academic\AcademicYearController;
 use App\Http\Controllers\Api\Academic\SemesterController;
 use App\Http\Controllers\Api\Academic\CurriculumController;
 use App\Http\Controllers\Api\Academic\ClassStudentController;
+use App\Http\Controllers\Api\Academic\GradeAssessmentController;
 use App\Http\Controllers\Api\Staff\TeacherAssignmentController;
 use App\Http\Controllers\Api\Academic\ScheduleController;
 use App\Http\Controllers\Api\Academic\PeriodController;
@@ -235,7 +236,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/grades/{grade}/finalize', [GradeController::class, 'finalize'])->middleware('permission:finalize-grades');
     Route::post('/grades/{grade}/unfinalize', [GradeController::class, 'unfinalize'])->middleware('permission:finalize-grades');
 
-        // =========================
+    // Grade assessments (Phase 2K) — admin only
+    Route::middleware('role:Admin,Administrator')->group(function () {
+        Route::get('/grade-assessments', [GradeAssessmentController::class, 'index']);
+        Route::post('/grade-assessments', [GradeAssessmentController::class, 'store']);
+        Route::get('/grade-assessments/{assessment}', [GradeAssessmentController::class, 'show']);
+        Route::put('/grade-assessments/{assessment}', [GradeAssessmentController::class, 'update']);
+        Route::delete('/grade-assessments/{assessment}', [GradeAssessmentController::class, 'destroy']);
+    });
+
+    // =========================
     // ANNOUNCEMENTS
     // =========================
     Route::get('/announcements', [AnnouncementController::class, 'index']);

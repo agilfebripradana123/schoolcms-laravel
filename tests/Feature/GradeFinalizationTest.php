@@ -6,6 +6,7 @@ use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassStudent;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
+use App\Models\Academic\GradeAssessment;
 use App\Models\Academic\ReportCard;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
@@ -144,12 +145,33 @@ class GradeFinalizationTest extends TestCase
             $t->string('academic_year', 20)->nullable();
             $t->unsignedBigInteger('semester_id');
             $t->unsignedBigInteger('academic_year_id');
-            $t->string('source_type', 50)->nullable();
-            $t->unsignedBigInteger('source_id')->nullable();
             $t->boolean('is_final')->default(false);
             $t->dateTime('finalized_at')->nullable();
             $t->unsignedBigInteger('finalized_by')->nullable();
             $t->timestamps();
+        });
+        Schema::create('grade_assessments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->string('assessment_category', 50);
+            $t->unsignedInteger('assessment_sequence');
+            $t->string('assessment_name', 100)->nullable();
+            $t->decimal('score', 5, 2);
+            $t->decimal('max_score', 5, 2)->default(100);
+            $t->decimal('weight', 5, 2)->nullable();
+            $t->string('source_type', 50)->nullable();
+            $t->unsignedInteger('source_id')->nullable();
+            $t->date('assessed_date')->nullable();
+            $t->text('notes')->nullable();
+            $t->timestamps();
+            $t->unique(
+                ['student_id', 'subject_id', 'class_id', 'academic_year_id', 'semester_id', 'assessment_category', 'assessment_sequence'],
+                'uq_grade_assessments_cat_seq'
+            );
         });
         Schema::create('report_cards', function (Blueprint $t) {
             $t->id();
@@ -365,6 +387,17 @@ class GradeFinalizationTest extends TestCase
             'academic_year' => '2025/2026',
             'semester_id' => $this->semester->id,
             'academic_year_id' => $this->ay->id,
+        ]);
+        $this->legacyAssessment = GradeAssessment::create([
+            'student_id' => $this->student->id,
+            'subject_id' => $mtk->id,
+            'class_id' => $this->class1->id,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'assessment_category' => 'uts',
+            'assessment_sequence' => 1,
+            'score' => 82.5,
+            'max_score' => 100.00,
             'source_type' => 'exam_result',
             'source_id' => 1,
         ]);
@@ -572,7 +605,6 @@ class GradeFinalizationTest extends TestCase
         $row = Grade::find($utsLocked->id);
         $this->assertTrue($row->is_final);
         $this->assertSame(82.5, (float) $row->score, 'locked slot is never overwritten');
-        $this->assertSame(1, $row->source_id, 'source trace of the locked grade is untouched');
         $this->assertSame('uts', $row->type);
     }
 
@@ -599,7 +631,13 @@ class GradeFinalizationTest extends TestCase
         Sanctum::actingAs($this->admin);
         $res = $this->postJson("/api/exam-results/{$resultId}/grade-sync");
         $res->assertStatus(200);
-        $synced = Grade::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $syncedAssessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $this->assertNotNull($syncedAssessment);
+        $synced = Grade::where('student_id', $syncedAssessment->student_id)
+            ->where('subject_id', $syncedAssessment->subject_id)
+            ->where('class_id', $syncedAssessment->class_id)
+            ->where('type', $syncedAssessment->assessment_category)
+            ->first();
         $this->assertNotNull($synced);
         $this->assertSame(100.0, (float) $synced->score);
     }
@@ -623,7 +661,12 @@ class GradeFinalizationTest extends TestCase
         Sanctum::actingAs($this->teacher);
         $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(200);
 
-        $synced = Grade::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $syncedAssessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $synced = Grade::where('student_id', $syncedAssessment->student_id)
+            ->where('subject_id', $syncedAssessment->subject_id)
+            ->where('class_id', $syncedAssessment->class_id)
+            ->where('type', $syncedAssessment->assessment_category)
+            ->first();
         $this->adminFinalize($synced->id)->assertStatus(200);
 
         // Regrade down to 5/20 -> exam result updates, academic grade stays locked.
@@ -654,7 +697,12 @@ class GradeFinalizationTest extends TestCase
         Sanctum::actingAs($this->teacher);
         $this->putJson("/api/teacher/exam-grading/answers/{$answerId}", ['score' => 10])->assertStatus(200);
 
-        $synced = Grade::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $syncedAssessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->first();
+        $synced = Grade::where('student_id', $syncedAssessment->student_id)
+            ->where('subject_id', $syncedAssessment->subject_id)
+            ->where('class_id', $syncedAssessment->class_id)
+            ->where('type', $syncedAssessment->assessment_category)
+            ->first();
         $this->assertSame(50.0, (float) $synced->score, 'unlocked grade auto-follows the regrade');
     }
 
@@ -743,14 +791,16 @@ class GradeFinalizationTest extends TestCase
 
     public function test_legacy_grade_rows_preserved(): void
     {
-        // Existing grade (type uit 'uts', with source trace) stays readable and
-        // intact; its source fields survive.
+        // The legacy Grade stays readable and intact.
         $row = Grade::with('student')->find($this->grade->id);
         $this->assertSame('uts', $row->type);
-        $this->assertSame('exam_result', $row->source_type);
-        $this->assertSame(1, $row->source_id);
         $this->assertSame(82.5, (float) $row->score);
         $this->assertFalse($row->is_final);
         $this->assertSame('Siswa A', $row->student->name);
+
+        // Source trace now lives on the assessment.
+        $assessment = GradeAssessment::find($this->legacyAssessment->id);
+        $this->assertSame('exam_result', $assessment->source_type);
+        $this->assertSame(1, $assessment->source_id);
     }
 }
