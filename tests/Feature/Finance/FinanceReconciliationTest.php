@@ -35,24 +35,7 @@ class FinanceReconciliationTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupFinanceTestData();
         $this->authenticateAsAdmin();
@@ -145,7 +128,7 @@ class FinanceReconciliationTest extends TestCase
 
     private function billingStatus(int $id): ?string
     {
-        return DB::connection('mysql')->table('billings')->where('id', $id)->value('status');
+        return DB::connection()->table('billings')->where('id', $id)->value('status');
     }
 
     private function validPaymentPayload(Billing $billing, array $overrides = []): array
@@ -176,7 +159,7 @@ class FinanceReconciliationTest extends TestCase
 
     private function cleanupFinanceTestData(): void
     {
-        $db = DB::connection('mysql');
+        $db = DB::connection();
 
         $db->table('payment_transactions')->where('transaction_code', 'like', 'VTX-%')->delete();
         $db->table('payments')->where('notes', 'like', 'PH4-%')->delete();
@@ -374,7 +357,7 @@ class FinanceReconciliationTest extends TestCase
         $response->assertStatus(200);
         $this->assertSame('unpaid', $this->billingStatus($billing->id));
         $this->assertNotNull(
-            DB::connection('mysql')->table('payments')->where('id', $payment->id)->value('deleted_at')
+            DB::connection()->table('payments')->where('id', $payment->id)->value('deleted_at')
         );
     }
 
@@ -591,7 +574,7 @@ class FinanceReconciliationTest extends TestCase
         $response = $this->postJson('/api/payments', $this->validPaymentPayload($billing));
 
         $response->assertStatus(500);
-        $this->assertSame(0, DB::connection('mysql')
+        $this->assertSame(0, DB::connection()
             ->table('payments')
             ->where('notes', 'like', 'PH4-%')
             ->count());

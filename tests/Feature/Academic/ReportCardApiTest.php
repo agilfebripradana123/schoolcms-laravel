@@ -24,24 +24,7 @@ class ReportCardApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestReportCards();
         $this->cleanupTestStudents();
@@ -67,7 +50,7 @@ class ReportCardApiTest extends TestCase
 
     private function cleanupTestReportCards(): void
     {
-        DB::connection('mysql')->table('report_cards')
+        DB::connection()->table('report_cards')
             ->where('id', '>', 105)
             ->delete();
     }
@@ -321,7 +304,7 @@ class ReportCardApiTest extends TestCase
             'success' => true,
             'message' => 'Report card deleted successfully',
         ]);
-        $this->assertDatabaseMissing('report_cards', ['id' => $reportCard->id], 'mysql');
+        $this->assertDatabaseMissing('report_cards', ['id' => $reportCard->id]);
     }
 
     public function test_delete_nonexistent_returns_404(): void

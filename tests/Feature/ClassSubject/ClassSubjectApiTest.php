@@ -18,24 +18,7 @@ class ClassSubjectApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestClassSubjects();
     }
@@ -96,9 +79,7 @@ class ClassSubjectApiTest extends TestCase
 
     private function cleanupTestClassSubjects(): void
     {
-        DB::connection('mysql')->table('class_subjects')
-            ->where('id', '>', 0)
-            ->delete();
+        DB::table('class_subjects')->whereNull('teacher_id')->delete();
     }
 
     private function getFirstClassId(): int
@@ -527,7 +508,7 @@ class ClassSubjectApiTest extends TestCase
             'class_id' => $classId,
             'subject_id' => $subjectId,
             'teacher_id' => $teacherId,
-        ], 'mysql');
+        ]);
     }
 
     public function test_store_with_teacher_id(): void
@@ -926,7 +907,7 @@ class ClassSubjectApiTest extends TestCase
 
         $this->assertDatabaseMissing('class_subjects', [
             'id' => $classSubject->id,
-        ], 'mysql');
+        ]);
     }
 
     public function test_delete_does_not_affect_classes(): void
@@ -940,7 +921,7 @@ class ClassSubjectApiTest extends TestCase
 
         $this->assertDatabaseHas('classes', [
             'id' => $classId,
-        ], 'mysql');
+        ]);
     }
 
     public function test_delete_does_not_affect_subjects(): void
@@ -954,7 +935,7 @@ class ClassSubjectApiTest extends TestCase
 
         $this->assertDatabaseHas('subjects', [
             'id' => $subjectId,
-        ], 'mysql');
+        ]);
     }
 
     public function test_delete_does_not_affect_teachers(): void
@@ -968,7 +949,7 @@ class ClassSubjectApiTest extends TestCase
 
         $this->assertDatabaseHas('teachers', [
             'id' => $teacherId,
-        ], 'mysql');
+        ]);
     }
 
     public function test_delete_nonexistent_returns_404(): void
@@ -1031,7 +1012,7 @@ class ClassSubjectApiTest extends TestCase
 
         $this->assertDatabaseHas('class_subjects', [
             'id' => $cs2->id,
-        ], 'mysql');
+        ]);
     }
 
     public function test_store_preserves_existing_records(): void
@@ -1043,14 +1024,14 @@ class ClassSubjectApiTest extends TestCase
             'subject_id' => $this->getFirstSubjectId(),
         ]);
 
-        $existingCount = DB::connection('mysql')->table('class_subjects')->count();
+        $existingCount = DB::connection()->table('class_subjects')->count();
 
         $this->postJson('/api/class-subjects', [
             'class_id' => $this->getSecondClassId(),
             'subject_id' => $this->getSecondSubjectId(),
         ])->assertStatus(201);
 
-        $newCount = DB::connection('mysql')->table('class_subjects')->count();
+        $newCount = DB::connection()->table('class_subjects')->count();
         $this->assertEquals($existingCount + 1, $newCount);
     }
 

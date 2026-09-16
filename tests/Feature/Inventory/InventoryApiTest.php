@@ -16,24 +16,7 @@ class InventoryApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestData();
     }
@@ -119,7 +102,7 @@ class InventoryApiTest extends TestCase
 
     private function cleanupTestData(): void
     {
-        DB::connection('mysql')->statement('DELETE FROM stock_movements WHERE inventory_id IN (SELECT id FROM inventories WHERE code LIKE "INV-%")');
+        DB::connection()->statement('DELETE FROM stock_movements WHERE inventory_id IN (SELECT id FROM inventories WHERE code LIKE "INV-%")');
         Inventory::where('code', 'like', 'INV-%')->forceDelete();
         Room::where('code', 'like', 'RM-%')->forceDelete();
     }
@@ -462,7 +445,7 @@ class InventoryApiTest extends TestCase
         $this->assertDatabaseHas('inventories', [
             'code' => 'INV-DB',
             'name' => 'DB Item',
-        ], 'mysql');
+        ]);
     }
 
     public function test_store_returns_data(): void
@@ -835,7 +818,7 @@ class InventoryApiTest extends TestCase
         $item = $this->createTestInventory();
         $itemId = $item->id;
         $this->deleteJson("/api/inventory/{$itemId}")->assertStatus(200);
-        $this->assertSoftDeleted('inventories', ['id' => $itemId], 'mysql');
+        $this->assertSoftDeleted('inventories', ['id' => $itemId]);
     }
 
     public function test_delete_nonexistent_returns_404(): void
@@ -995,6 +978,6 @@ class InventoryApiTest extends TestCase
         $item1 = $this->createTestInventory(['code' => 'INV-P1']);
         $item2 = $this->createTestInventory(['code' => 'INV-P2']);
         $this->deleteJson("/api/inventory/{$item1->id}")->assertStatus(200);
-        $this->assertDatabaseHas('inventories', ['code' => 'INV-P2'], 'mysql');
+        $this->assertDatabaseHas('inventories', ['code' => 'INV-P2']);
     }
 }

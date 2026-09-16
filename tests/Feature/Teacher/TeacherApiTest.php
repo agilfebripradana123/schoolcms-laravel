@@ -16,24 +16,7 @@ class TeacherApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestTeachers();
         $this->cleanupTestUsers();
@@ -1263,7 +1246,7 @@ class TeacherApiTest extends TestCase
         $teacher = $this->createTestTeacher();
         $teacherId = $teacher->id;
 
-        $db = $this->app['db']->connection('mysql');
+        $db = $this->app['db']->connection();
 
         $existingClass = $db->table('classes')->whereNotNull('teacher_id')->first();
         if (!$existingClass) {
@@ -1298,7 +1281,7 @@ class TeacherApiTest extends TestCase
 
         $this->deleteJson("/api/teachers/{$teacherId}");
 
-        $csCount = $this->app['db']->connection('mysql')
+        $csCount = $this->app['db']->connection()
             ->table('class_subjects')
             ->where('teacher_id', $teacherId)
             ->count();
@@ -1321,7 +1304,7 @@ class TeacherApiTest extends TestCase
 
         $response->assertStatus(200);
 
-        $dbUser = $this->app['db']->connection('mysql')
+        $dbUser = $this->app['db']->connection()
             ->table('users')
             ->where('id', $userId)
             ->first();
@@ -1336,7 +1319,7 @@ class TeacherApiTest extends TestCase
         $this->authenticate();
 
         $teacher = $this->createTestTeacher();
-        $subjectCount = $this->app['db']->connection('mysql')
+        $subjectCount = $this->app['db']->connection()
             ->table('subjects')
             ->count();
 
@@ -1344,7 +1327,7 @@ class TeacherApiTest extends TestCase
 
         $response->assertStatus(200);
 
-        $newSubjectCount = $this->app['db']->connection('mysql')
+        $newSubjectCount = $this->app['db']->connection()
             ->table('subjects')
             ->count();
         $this->assertEquals($subjectCount, $newSubjectCount);
@@ -1357,7 +1340,7 @@ class TeacherApiTest extends TestCase
         $this->authenticate();
 
         $teacher = $this->createTestTeacher();
-        $roleCount = $this->app['db']->connection('mysql')
+        $roleCount = $this->app['db']->connection()
             ->table('roles')
             ->count();
 
@@ -1365,7 +1348,7 @@ class TeacherApiTest extends TestCase
 
         $response->assertStatus(200);
 
-        $newRoleCount = $this->app['db']->connection('mysql')
+        $newRoleCount = $this->app['db']->connection()
             ->table('roles')
             ->count();
         $this->assertEquals($roleCount, $newRoleCount);
@@ -1667,7 +1650,7 @@ class TeacherApiTest extends TestCase
     {
         $this->authenticate();
 
-        $countBefore = $this->app['db']->connection('mysql')
+        $countBefore = $this->app['db']->connection()
             ->table('teachers')
             ->whereNull('deleted_at')
             ->count();
@@ -1676,7 +1659,7 @@ class TeacherApiTest extends TestCase
 
         $this->deleteJson("/api/teachers/{$teacher->id}");
 
-        $countAfter = $this->app['db']->connection('mysql')
+        $countAfter = $this->app['db']->connection()
             ->table('teachers')
             ->whereNull('deleted_at')
             ->count();

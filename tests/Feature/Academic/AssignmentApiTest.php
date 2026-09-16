@@ -24,24 +24,7 @@ class AssignmentApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestAssignments();
         $this->setupTestData();
@@ -63,7 +46,7 @@ class AssignmentApiTest extends TestCase
 
     private function cleanupTestAssignments(): void
     {
-        DB::connection('mysql')->table('assignments')
+        DB::connection()->table('assignments')
             ->where('title', 'LIKE', 'Test Assignment%')
             ->delete();
     }
@@ -292,7 +275,7 @@ class AssignmentApiTest extends TestCase
             'success' => true,
             'message' => 'Assignment deleted successfully',
         ]);
-        $this->assertDatabaseMissing('assignments', ['id' => $assignment->id], 'mysql');
+        $this->assertDatabaseMissing('assignments', ['id' => $assignment->id]);
     }
 
     public function test_delete_nonexistent_returns_404(): void

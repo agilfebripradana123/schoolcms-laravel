@@ -36,30 +36,13 @@ class FinanceBusinessValidationTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupFinanceTestData();
         $this->authenticateAsAdmin();
 
         $this->academicYearId = AcademicYear::whereNull('deleted_at')->orderBy('id')->value('id');
-        $this->semesterId = DB::connection('mysql')->table('semesters')->orderBy('id')->value('id');
+        $this->semesterId = DB::connection()->table('semesters')->orderBy('id')->value('id');
     }
 
     protected function tearDown(): void
@@ -189,7 +172,7 @@ class FinanceBusinessValidationTest extends TestCase
 
     private function cleanupFinanceTestData(): void
     {
-        $db = DB::connection('mysql');
+        $db = DB::connection();
 
         $db->table('payment_transactions')->where('transaction_code', 'like', 'VTX-%')->delete();
         $db->table('payments')->where('notes', 'like', 'PH3-%')->delete();
@@ -205,7 +188,7 @@ class FinanceBusinessValidationTest extends TestCase
 
     private function dbAmount(string $table, int $id, string $column): ?string
     {
-        $row = DB::connection('mysql')->table($table)->where('id', $id)->first();
+        $row = DB::connection()->table($table)->where('id', $id)->first();
 
         return $row ? $row->{$column} : null;
     }

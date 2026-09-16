@@ -21,41 +21,24 @@ class FinanceSchemaFoundationTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
     }
 
     private function connection(): ConnectionInterface
     {
-        return DB::connection('mysql');
+        return DB::connection();
     }
 
     private function hasColumn(string $table, string $column): bool
     {
-        return Schema::connection('mysql')->hasColumn($table, $column);
+        return Schema::connection()->hasColumn($table, $column);
     }
 
     private function hasIndex(string $table, string $index): bool
     {
         return $this->connection()
             ->table('information_schema.STATISTICS')
-            ->where('TABLE_SCHEMA', DB::connection('mysql')->getDatabaseName())
+            ->where('TABLE_SCHEMA', DB::connection()->getDatabaseName())
             ->where('TABLE_NAME', $table)
             ->where('INDEX_NAME', $index)
             ->exists();
@@ -65,7 +48,7 @@ class FinanceSchemaFoundationTest extends TestCase
     {
         return $this->connection()
             ->table('information_schema.STATISTICS')
-            ->where('TABLE_SCHEMA', DB::connection('mysql')->getDatabaseName())
+            ->where('TABLE_SCHEMA', DB::connection()->getDatabaseName())
             ->where('TABLE_NAME', $table)
             ->where('INDEX_NAME', $index)
             ->where('NON_UNIQUE', 0)
@@ -76,7 +59,7 @@ class FinanceSchemaFoundationTest extends TestCase
     {
         $row = $this->connection()
             ->table('information_schema.REFERENTIAL_CONSTRAINTS')
-            ->where('CONSTRAINT_SCHEMA', DB::connection('mysql')->getDatabaseName())
+            ->where('CONSTRAINT_SCHEMA', DB::connection()->getDatabaseName())
             ->where('TABLE_NAME', $table)
             ->where('CONSTRAINT_NAME', $fk)
             ->first();

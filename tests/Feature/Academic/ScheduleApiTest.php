@@ -28,24 +28,7 @@ class ScheduleApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestSchedules();
         $this->setupTestData();
@@ -69,7 +52,7 @@ class ScheduleApiTest extends TestCase
 
     private function cleanupTestSchedules(): void
     {
-        DB::connection('mysql')->table('schedules')
+        DB::connection()->table('schedules')
             ->where('id', '>', 100)
             ->delete();
     }
@@ -349,7 +332,7 @@ class ScheduleApiTest extends TestCase
             'success' => true,
             'message' => 'Schedule deleted successfully',
         ]);
-        $this->assertDatabaseMissing('schedules', ['id' => $schedule->id], 'mysql');
+        $this->assertDatabaseMissing('schedules', ['id' => $schedule->id]);
     }
 
     public function test_delete_nonexistent_returns_404(): void

@@ -18,24 +18,7 @@ class TeacherSecurityAuditTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestTeachers();
         $this->cleanupTestUsers();
@@ -736,7 +719,7 @@ class TeacherSecurityAuditTest extends TestCase
         $dbTeacher = Teacher::withTrashed()->find($id);
         $this->assertNotNull($dbTeacher->deleted_at);
 
-        $raw = DB::connection('mysql')->table('teachers')->where('id', $id)->first();
+        $raw = DB::connection()->table('teachers')->where('id', $id)->first();
         $this->assertNotNull($raw);
         $this->assertNotNull($raw->deleted_at);
 
@@ -752,7 +735,7 @@ class TeacherSecurityAuditTest extends TestCase
 
         $this->deleteJson("/api/teachers/{$id}")->assertStatus(200);
 
-        $raw = DB::connection('mysql')->table('teachers')->where('id', $id)->first();
+        $raw = DB::connection()->table('teachers')->where('id', $id)->first();
         $this->assertNotNull($raw);
         $this->assertNotNull($raw->deleted_at);
         $this->assertEquals($teacher->nip, $raw->nip);
@@ -781,7 +764,7 @@ class TeacherSecurityAuditTest extends TestCase
     {
         $this->authenticateAsAdmin();
 
-        $usersBefore = DB::connection('mysql')->table('users')->count();
+        $usersBefore = DB::connection()->table('users')->count();
 
         $file = $this->createImportFile([
             $this->getExpectedHeaders(),
@@ -793,7 +776,7 @@ class TeacherSecurityAuditTest extends TestCase
 
         $this->postJson('/api/teachers/import', ['file' => $file])->assertStatus(200);
 
-        $usersAfter = DB::connection('mysql')->table('users')->count();
+        $usersAfter = DB::connection()->table('users')->count();
         $this->assertEquals($usersBefore, $usersAfter);
 
         $this->cleanupTestTeachers();
@@ -803,7 +786,7 @@ class TeacherSecurityAuditTest extends TestCase
     {
         $this->authenticateAsAdmin();
 
-        $rolesBefore = DB::connection('mysql')->table('roles')->count();
+        $rolesBefore = DB::connection()->table('roles')->count();
 
         $file = $this->createImportFile([
             $this->getExpectedHeaders(),
@@ -815,7 +798,7 @@ class TeacherSecurityAuditTest extends TestCase
 
         $this->postJson('/api/teachers/import', ['file' => $file])->assertStatus(200);
 
-        $rolesAfter = DB::connection('mysql')->table('roles')->count();
+        $rolesAfter = DB::connection()->table('roles')->count();
         $this->assertEquals($rolesBefore, $rolesAfter);
 
         $this->cleanupTestTeachers();
@@ -825,7 +808,7 @@ class TeacherSecurityAuditTest extends TestCase
     {
         $this->authenticateAsAdmin();
 
-        $classesBefore = DB::connection('mysql')->table('classes')->count();
+        $classesBefore = DB::connection()->table('classes')->count();
 
         $file = $this->createImportFile([
             $this->getExpectedHeaders(),
@@ -837,7 +820,7 @@ class TeacherSecurityAuditTest extends TestCase
 
         $this->postJson('/api/teachers/import', ['file' => $file])->assertStatus(200);
 
-        $classesAfter = DB::connection('mysql')->table('classes')->count();
+        $classesAfter = DB::connection()->table('classes')->count();
         $this->assertEquals($classesBefore, $classesAfter);
 
         $this->cleanupTestTeachers();
@@ -847,7 +830,7 @@ class TeacherSecurityAuditTest extends TestCase
     {
         $this->authenticateAsAdmin();
 
-        $subjectsBefore = DB::connection('mysql')->table('subjects')->count();
+        $subjectsBefore = DB::connection()->table('subjects')->count();
 
         $file = $this->createImportFile([
             $this->getExpectedHeaders(),
@@ -859,7 +842,7 @@ class TeacherSecurityAuditTest extends TestCase
 
         $this->postJson('/api/teachers/import', ['file' => $file])->assertStatus(200);
 
-        $subjectsAfter = DB::connection('mysql')->table('subjects')->count();
+        $subjectsAfter = DB::connection()->table('subjects')->count();
         $this->assertEquals($subjectsBefore, $subjectsAfter);
 
         $this->cleanupTestTeachers();
@@ -909,12 +892,12 @@ class TeacherSecurityAuditTest extends TestCase
     {
         $this->authenticateAsAdmin();
 
-        DB::connection('mysql')->enableQueryLog();
+        DB::connection()->enableQueryLog();
 
         $this->getJson('/api/teachers/export');
 
-        $queries = DB::connection('mysql')->getQueryLog();
-        DB::connection('mysql')->disableQueryLog();
+        $queries = DB::connection()->getQueryLog();
+        DB::connection()->disableQueryLog();
 
         foreach ($queries as $query) {
             $sql = strtolower($query['query']);
@@ -932,12 +915,12 @@ class TeacherSecurityAuditTest extends TestCase
     {
         $this->authenticateAsAdmin();
 
-        DB::connection('mysql')->enableQueryLog();
+        DB::connection()->enableQueryLog();
 
         $this->getJson('/api/teachers?per_page=10');
 
-        $queries = DB::connection('mysql')->getQueryLog();
-        DB::connection('mysql')->disableQueryLog();
+        $queries = DB::connection()->getQueryLog();
+        DB::connection()->disableQueryLog();
 
         $queryCount = count($queries);
         $this->assertLessThanOrEqual(4, $queryCount, "Index should not have N+1 queries (got {$queryCount})");
@@ -954,8 +937,8 @@ class TeacherSecurityAuditTest extends TestCase
         $teachersBefore = Teacher::count();
         $usersBefore = User::count();
         $rolesBefore = Role::count();
-        $classesBefore = DB::connection('mysql')->table('classes')->count();
-        $subjectsBefore = DB::connection('mysql')->table('subjects')->count();
+        $classesBefore = DB::connection()->table('classes')->count();
+        $subjectsBefore = DB::connection()->table('subjects')->count();
 
         $this->getJson('/api/teachers');
         $this->getJson('/api/teachers/1');
@@ -970,21 +953,21 @@ class TeacherSecurityAuditTest extends TestCase
         $this->assertEquals($teachersBefore, Teacher::count());
         $this->assertEquals($usersBefore, User::count());
         $this->assertEquals($rolesBefore, Role::count());
-        $this->assertEquals($classesBefore, DB::connection('mysql')->table('classes')->count());
-        $this->assertEquals($subjectsBefore, DB::connection('mysql')->table('subjects')->count());
+        $this->assertEquals($classesBefore, DB::connection()->table('classes')->count());
+        $this->assertEquals($subjectsBefore, DB::connection()->table('subjects')->count());
     }
 
     public function test_database_schema_unchanged(): void
     {
         $this->authenticateAsAdmin();
 
-        $before = $this->app['db']->connection('mysql')
+        $before = $this->app['db']->connection()
             ->select('SHOW CREATE TABLE teachers');
 
         $this->getJson('/api/teachers');
         $this->getJson('/api/teachers/export');
 
-        $after = $this->app['db']->connection('mysql')
+        $after = $this->app['db']->connection()
             ->select('SHOW CREATE TABLE teachers');
 
         $strip = fn ($sql) => preg_replace('/\s*AUTO_INCREMENT=\d+/', '', $sql);

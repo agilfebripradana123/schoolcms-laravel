@@ -15,24 +15,7 @@ class RoomApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestRooms();
     }
@@ -491,7 +474,7 @@ class RoomApiTest extends TestCase
         $this->assertDatabaseHas('rooms', [
             'code' => 'RM-DB',
             'name' => 'DB Room',
-        ], 'mysql');
+        ]);
     }
 
     public function test_store_returns_data(): void
@@ -909,7 +892,7 @@ class RoomApiTest extends TestCase
         $room = $this->createTestRoom();
         $roomId = $room->id;
         $this->deleteJson("/api/rooms/{$roomId}")->assertStatus(200);
-        $this->assertSoftDeleted('rooms', ['id' => $roomId], 'mysql');
+        $this->assertSoftDeleted('rooms', ['id' => $roomId]);
     }
 
     public function test_delete_nonexistent_returns_404(): void
@@ -960,7 +943,7 @@ class RoomApiTest extends TestCase
         $this->authenticateAsAdmin();
         $room = $this->createTestRoom();
         $this->deleteJson("/api/rooms/{$room->id}")->assertStatus(200);
-        $this->assertDatabaseHas('rooms', ['id' => $room->id], 'mysql');
+        $this->assertDatabaseHas('rooms', ['id' => $room->id]);
     }
 
     public function test_delete_preserves_other_rooms(): void
@@ -969,7 +952,7 @@ class RoomApiTest extends TestCase
         $room1 = $this->createTestRoom(['code' => 'RM-P1']);
         $room2 = $this->createTestRoom(['code' => 'RM-P2']);
         $this->deleteJson("/api/rooms/{$room1->id}")->assertStatus(200);
-        $this->assertDatabaseHas('rooms', ['code' => 'RM-P2'], 'mysql');
+        $this->assertDatabaseHas('rooms', ['code' => 'RM-P2']);
     }
 
     // ─── IDOR Tests ────────────────────────────────────────────

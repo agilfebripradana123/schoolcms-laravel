@@ -16,24 +16,7 @@ class StockMovementApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestData();
     }
@@ -101,7 +84,7 @@ class StockMovementApiTest extends TestCase
 
     private function cleanupTestData(): void
     {
-        DB::connection('mysql')->statement('DELETE FROM stock_movements WHERE inventory_id IN (SELECT id FROM inventories WHERE code LIKE "STK-%")');
+        DB::connection()->statement('DELETE FROM stock_movements WHERE inventory_id IN (SELECT id FROM inventories WHERE code LIKE "STK-%")');
         Inventory::where('code', 'like', 'STK-%')->forceDelete();
     }
 
@@ -271,7 +254,7 @@ class StockMovementApiTest extends TestCase
             'quantity' => 10,
             'notes' => 'Test',
             'created_by' => 'Admin',
-        ], 'mysql');
+        ]);
     }
 
     public function test_stock_in_nonexistent_returns_404(): void
@@ -343,7 +326,7 @@ class StockMovementApiTest extends TestCase
             'type' => 'stock_out',
             'quantity' => 15,
             'notes' => 'Pemakaian lab',
-        ], 'mysql');
+        ]);
     }
 
     public function test_stock_out_insufficient_stock_rejected(): void
@@ -452,7 +435,7 @@ class StockMovementApiTest extends TestCase
             'quantity' => 5,
             'notes' => 'Test adjustment',
             'created_by' => 'Admin',
-        ], 'mysql');
+        ]);
     }
 
     public function test_adjustment_requires_notes(): void

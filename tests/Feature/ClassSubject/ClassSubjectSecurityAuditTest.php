@@ -18,24 +18,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestClassSubjects();
     }
@@ -90,9 +73,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
 
     private function cleanupTestClassSubjects(): void
     {
-        DB::connection('mysql')->table('class_subjects')
-            ->where('id', '>', 0)
-            ->delete();
+        DB::table('class_subjects')->whereNull('teacher_id')->delete();
     }
 
     private function getFirstClassId(): int
@@ -534,7 +515,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
 
         $this->deleteJson("/api/class-subjects/{$classSubject->id}")->assertStatus(200);
 
-        $this->assertDatabaseMissing('class_subjects', ['id' => $classSubject->id], 'mysql');
+        $this->assertDatabaseMissing('class_subjects', ['id' => $classSubject->id]);
     }
 
     public function test_hard_delete_preserves_classes_table(): void
@@ -545,7 +526,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
 
         $this->deleteJson("/api/class-subjects/{$classSubject->id}")->assertStatus(200);
 
-        $this->assertDatabaseHas('classes', ['id' => $classId], 'mysql');
+        $this->assertDatabaseHas('classes', ['id' => $classId]);
     }
 
     public function test_hard_delete_preserves_subjects_table(): void
@@ -556,7 +537,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
 
         $this->deleteJson("/api/class-subjects/{$classSubject->id}")->assertStatus(200);
 
-        $this->assertDatabaseHas('subjects', ['id' => $subjectId], 'mysql');
+        $this->assertDatabaseHas('subjects', ['id' => $subjectId]);
     }
 
     public function test_hard_delete_preserves_teachers_table(): void
@@ -567,7 +548,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
 
         $this->deleteJson("/api/class-subjects/{$classSubject->id}")->assertStatus(200);
 
-        $this->assertDatabaseHas('teachers', ['id' => $teacherId], 'mysql');
+        $this->assertDatabaseHas('teachers', ['id' => $teacherId]);
     }
 
     public function test_delete_one_preserves_others(): void
@@ -585,7 +566,7 @@ class ClassSubjectSecurityAuditTest extends TestCase
 
         $this->deleteJson("/api/class-subjects/{$cs1->id}")->assertStatus(200);
 
-        $this->assertDatabaseHas('class_subjects', ['id' => $cs2->id], 'mysql');
+        $this->assertDatabaseHas('class_subjects', ['id' => $cs2->id]);
     }
 
     // ─── Pagination Abuse Tests ──────────────────────────────────

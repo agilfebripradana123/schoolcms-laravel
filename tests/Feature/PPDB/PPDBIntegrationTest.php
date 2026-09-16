@@ -19,27 +19,6 @@ class PPDBIntegrationTest extends TestCase
     {
         parent::setUp();
 
-        // Ambil kredensial DB dari env (default: konvensi repo). Mesin lokal memakai
-        // DB_PORT=3307 & password kosong, jadi dipakai env bila ada.
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'schoolcms_db'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
-
-        $this->app['db']->purge('mysql');
-
         $this->cleanupTestData();
     }
 
@@ -132,31 +111,31 @@ class PPDBIntegrationTest extends TestCase
             ->pluck('id');
 
         foreach ($registrants as $rid) {
-            DB::connection('mysql')->statement('DELETE FROM audit_logs WHERE model="Registrant" AND model_id=?', [$rid]);
+            DB::connection()->statement('DELETE FROM audit_logs WHERE model="Registrant" AND model_id=?', [$rid]);
         }
 
         // Hapus student turunan + data terkait (cascade), lalu user.
-        $studentIds = DB::connection('mysql')
+        $studentIds = DB::connection()
             ->table('registrants')
             ->where('registration_number', 'LIKE', 'PPDB-INT-%')
             ->pluck('student_id')
             ->filter();
 
         foreach ($studentIds as $sid) {
-            DB::connection('mysql')->table('students')->where('id', $sid)->delete();
+            DB::connection()->table('students')->where('id', $sid)->delete();
         }
 
-        $usernames = DB::connection('mysql')
+        $usernames = DB::connection()
             ->table('registrants')
             ->where('registration_number', 'LIKE', 'PPDB-INT-%')
             ->pluck('nisn')
             ->filter();
 
         foreach ($usernames as $u) {
-            DB::connection('mysql')->table('users')->where('username', $u)->delete();
+            DB::connection()->table('users')->where('username', $u)->delete();
         }
 
-        DB::connection('mysql')->statement('DELETE FROM registrants WHERE registration_number LIKE "PPDB-INT-%"');
+        DB::connection()->statement('DELETE FROM registrants WHERE registration_number LIKE "PPDB-INT-%"');
     }
 
     public function test_verify_re_registration_creates_student_user_parents_guardians(): void

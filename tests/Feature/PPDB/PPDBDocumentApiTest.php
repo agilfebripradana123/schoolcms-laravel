@@ -18,24 +18,7 @@ class PPDBDocumentApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestData();
     }
@@ -116,11 +99,11 @@ class PPDBDocumentApiTest extends TestCase
 
     private function cleanupTestData(): void
     {
-        DB::connection('mysql')->statement('DELETE FROM registrants WHERE registration_number LIKE "DOC-TEST-%"');
+        DB::connection()->statement('DELETE FROM registrants WHERE registration_number LIKE "DOC-TEST-%"');
 
-        $siswaIds = DB::connection('mysql')->table('users')->where('username', 'like', 'ppdbsiswa_%')->pluck('id');
-        DB::connection('mysql')->table('students')->whereIn('user_id', $siswaIds)->delete();
-        DB::connection('mysql')->table('users')->whereIn('id', $siswaIds)->delete();
+        $siswaIds = DB::connection()->table('users')->where('username', 'like', 'ppdbsiswa_%')->pluck('id');
+        DB::connection()->table('students')->whereIn('user_id', $siswaIds)->delete();
+        DB::connection()->table('users')->whereIn('id', $siswaIds)->delete();
     }
 
     // ─── Metadata Tests ────────────────────────────────────────

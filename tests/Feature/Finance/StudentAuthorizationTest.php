@@ -32,24 +32,7 @@ class StudentAuthorizationTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestData();
     }
@@ -92,7 +75,7 @@ class StudentAuthorizationTest extends TestCase
 
     private function cleanupTestData(): void
     {
-        $db = DB::connection('mysql');
+        $db = DB::connection();
 
         $db->table('users')->where('username', 'like', 'PH8U-%')->delete();
         Student::where('nisn', 'like', 'PH8-%')
@@ -222,7 +205,7 @@ class StudentAuthorizationTest extends TestCase
         $user = $this->createUser('Siswa');
         $student = $this->createStudent(['user_id' => $user->id]);
 
-        $stored = DB::connection('mysql')->table('students')->where('id', $student->id)->value('user_id');
+        $stored = DB::connection()->table('students')->where('id', $student->id)->value('user_id');
         $this->assertSame($user->id, (int) $stored);
     }
 

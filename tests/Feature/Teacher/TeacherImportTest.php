@@ -17,24 +17,7 @@ class TeacherImportTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestTeachers();
         $this->cleanupTestUsers();
@@ -830,7 +813,7 @@ class TeacherImportTest extends TestCase
     {
         $this->authenticate();
 
-        $usersBefore = $this->app['db']->connection('mysql')
+        $usersBefore = $this->app['db']->connection()
             ->table('users')
             ->whereNull('deleted_at')
             ->count();
@@ -844,7 +827,7 @@ class TeacherImportTest extends TestCase
             'file' => $file,
         ]);
 
-        $usersAfter = $this->app['db']->connection('mysql')
+        $usersAfter = $this->app['db']->connection()
             ->table('users')
             ->whereNull('deleted_at')
             ->count();
@@ -858,7 +841,7 @@ class TeacherImportTest extends TestCase
     {
         $this->authenticate();
 
-        $rolesBefore = $this->app['db']->connection('mysql')
+        $rolesBefore = $this->app['db']->connection()
             ->table('roles')
             ->count();
 
@@ -871,7 +854,7 @@ class TeacherImportTest extends TestCase
             'file' => $file,
         ]);
 
-        $rolesAfter = $this->app['db']->connection('mysql')
+        $rolesAfter = $this->app['db']->connection()
             ->table('roles')
             ->count();
 
@@ -911,7 +894,7 @@ class TeacherImportTest extends TestCase
     {
         $this->authenticate();
 
-        $before = $this->app['db']->connection('mysql')
+        $before = $this->app['db']->connection()
             ->select('SHOW CREATE TABLE teachers');
 
         $file = $this->createExcelFile([
@@ -923,7 +906,7 @@ class TeacherImportTest extends TestCase
             'file' => $file,
         ]);
 
-        $after = $this->app['db']->connection('mysql')
+        $after = $this->app['db']->connection()
             ->select('SHOW CREATE TABLE teachers');
 
         $stripAutoIncrement = fn ($sql) => preg_replace('/\s*AUTO_INCREMENT=\d+/', '', $sql);

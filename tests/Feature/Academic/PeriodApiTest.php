@@ -15,24 +15,7 @@ class PeriodApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestPeriods();
     }
@@ -45,7 +28,7 @@ class PeriodApiTest extends TestCase
 
     private function cleanupTestPeriods(): void
     {
-        DB::connection('mysql')->table('periods')
+        DB::connection()->table('periods')
             ->where('name', 'LIKE', 'Test Period%')
             ->delete();
     }
@@ -244,7 +227,7 @@ class PeriodApiTest extends TestCase
             'success' => true,
             'message' => 'Period deleted successfully',
         ]);
-        $this->assertDatabaseMissing('periods', ['id' => $period->id], 'mysql');
+        $this->assertDatabaseMissing('periods', ['id' => $period->id]);
     }
 
     public function test_delete_nonexistent_returns_404(): void

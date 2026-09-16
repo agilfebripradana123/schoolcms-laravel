@@ -15,24 +15,7 @@ class UserNotificationApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestData();
     }
@@ -86,8 +69,8 @@ class UserNotificationApiTest extends TestCase
 
     private function cleanupTestData(): void
     {
-        DB::connection('mysql')->statement('DELETE FROM notifications WHERE title LIKE "NOTIF-TEST-%"');
-        DB::connection('mysql')->statement('DELETE FROM users WHERE username LIKE "notiftest-%"');
+        DB::connection()->statement('DELETE FROM notifications WHERE title LIKE "NOTIF-TEST-%"');
+        DB::connection()->statement('DELETE FROM users WHERE username LIKE "notiftest-%"');
     }
 
     // ─── Authorization ───────────────────────────────────────

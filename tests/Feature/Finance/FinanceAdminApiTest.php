@@ -40,30 +40,13 @@ class FinanceAdminApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupFinanceTestData();
 
         $this->adminUserId = $this->ensureRoleUser('Admin')->id;
         $this->academicYearId = AcademicYear::orderByDesc('id')->value('id');
-        $this->semesterId = DB::connection('mysql')->table('semesters')->orderBy('id')->value('id');
+        $this->semesterId = DB::connection()->table('semesters')->orderBy('id')->value('id');
     }
 
     protected function tearDown(): void
@@ -186,7 +169,7 @@ class FinanceAdminApiTest extends TestCase
 
     private function dbValue(string $table, int $id, string $column): mixed
     {
-        return DB::connection('mysql')->table($table)->where('id', $id)->value($column);
+        return DB::connection()->table($table)->where('id', $id)->value($column);
     }
 
     private function billingStatus(int $id): ?string
@@ -201,7 +184,7 @@ class FinanceAdminApiTest extends TestCase
 
     private function cleanupFinanceTestData(): void
     {
-        $db = DB::connection('mysql');
+        $db = DB::connection();
 
         $db->table('payment_transactions')->where('transaction_code', 'like', 'VTX-%')->delete();
         $db->table('payments')->where('notes', 'like', 'PH7-%')->delete();

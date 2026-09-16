@@ -17,24 +17,7 @@ class MaintenanceSecurityAuditTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestMaintenance();
     }
@@ -564,7 +547,7 @@ class MaintenanceSecurityAuditTest extends TestCase
         $record = $this->createTestMaintenance();
         $response = $this->putJson("/api/maintenance/{$record->id}", []);
         $response->assertStatus(200);
-        $this->assertDatabaseHas('maintenance', ['id' => $record->id], 'mysql');
+        $this->assertDatabaseHas('maintenance', ['id' => $record->id]);
     }
 
     public function test_store_rejects_negative_estimated_cost(): void
@@ -742,7 +725,7 @@ class MaintenanceSecurityAuditTest extends TestCase
         $record = $this->createTestMaintenance();
         $recordId = $record->id;
         $this->deleteJson("/api/maintenance/{$recordId}")->assertStatus(200);
-        $this->assertDatabaseHas('maintenance', ['id' => $recordId], 'mysql');
+        $this->assertDatabaseHas('maintenance', ['id' => $recordId]);
         $dbRecord = Maintenance::withTrashed()->find($recordId);
         $this->assertNotNull($dbRecord->deleted_at);
     }
@@ -763,7 +746,7 @@ class MaintenanceSecurityAuditTest extends TestCase
     public function test_database_schema_unchanged(): void
     {
         $this->authenticateAsAdmin();
-        $columns = DB::connection('mysql')->select('SHOW COLUMNS FROM maintenance');
+        $columns = DB::connection()->select('SHOW COLUMNS FROM maintenance');
         $columnNames = array_column($columns, 'Field');
         $this->assertContains('id', $columnNames);
         $this->assertContains('code', $columnNames);

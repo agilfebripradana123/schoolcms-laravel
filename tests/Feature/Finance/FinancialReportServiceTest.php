@@ -47,30 +47,13 @@ class FinancialReportServiceTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupFinanceTestData();
 
         $this->adminUserId = User::where('role_id', Role::where('name', 'Admin')->value('id'))->firstOrFail()->id;
         $this->testAcademicYearId = AcademicYear::orderByDesc('id')->value('id');
-        $this->testSemesterId = DB::connection('mysql')->table('semesters')->orderBy('id')->value('id');
+        $this->testSemesterId = DB::connection()->table('semesters')->orderBy('id')->value('id');
     }
 
     protected function tearDown(): void
@@ -208,7 +191,7 @@ class FinancialReportServiceTest extends TestCase
 
     private function cleanupFinanceTestData(): void
     {
-        $db = DB::connection('mysql');
+        $db = DB::connection();
 
         $db->table('payment_transactions')->where('transaction_code', 'like', 'VTX-%')->delete();
         $db->table('payments')->where('notes', 'like', 'PH6-%')->delete();
@@ -238,7 +221,7 @@ class FinancialReportServiceTest extends TestCase
         $this->assertSame(64, strlen($response->json('data.source_fingerprint')));
 
         $reportId = $response->json('data.id');
-        $stored = DB::connection('mysql')->table('financial_reports')->where('id', $reportId)->first();
+        $stored = DB::connection()->table('financial_reports')->where('id', $reportId)->first();
         $this->assertSame('700000.00', $stored->total_billed);
         $this->assertSame('500000.00', $stored->total_paid);
         $this->assertSame('200000.00', $stored->total_outstanding);

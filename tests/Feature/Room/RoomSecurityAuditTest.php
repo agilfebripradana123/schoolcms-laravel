@@ -15,24 +15,7 @@ class RoomSecurityAuditTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestRooms();
     }
@@ -547,7 +530,7 @@ class RoomSecurityAuditTest extends TestCase
         $room = $this->createTestRoom();
         $response = $this->putJson("/api/rooms/{$room->id}", []);
         $response->assertStatus(200);
-        $this->assertDatabaseHas('rooms', ['id' => $room->id], 'mysql');
+        $this->assertDatabaseHas('rooms', ['id' => $room->id]);
     }
 
     public function test_store_rejects_string_capacity(): void
@@ -689,7 +672,7 @@ class RoomSecurityAuditTest extends TestCase
         $room = $this->createTestRoom();
         $roomId = $room->id;
         $this->deleteJson("/api/rooms/{$roomId}")->assertStatus(200);
-        $this->assertDatabaseHas('rooms', ['id' => $roomId], 'mysql');
+        $this->assertDatabaseHas('rooms', ['id' => $roomId]);
         $dbRoom = Room::withTrashed()->find($roomId);
         $this->assertNotNull($dbRoom->deleted_at);
     }
@@ -710,7 +693,7 @@ class RoomSecurityAuditTest extends TestCase
     public function test_database_schema_unchanged(): void
     {
         $this->authenticateAsAdmin();
-        $columns = DB::connection('mysql')->select('SHOW COLUMNS FROM rooms');
+        $columns = DB::connection()->select('SHOW COLUMNS FROM rooms');
         $columnNames = array_column($columns, 'Field');
         $this->assertContains('id', $columnNames);
         $this->assertContains('code', $columnNames);

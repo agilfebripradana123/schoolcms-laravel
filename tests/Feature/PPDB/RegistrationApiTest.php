@@ -16,24 +16,7 @@ class RegistrationApiTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestData();
     }
@@ -95,7 +78,7 @@ class RegistrationApiTest extends TestCase
 
     private function cleanupTestData(): void
     {
-        DB::connection('mysql')->statement('DELETE FROM registrants WHERE registration_number LIKE "PPDB-TEST-%"');
+        DB::connection()->statement('DELETE FROM registrants WHERE registration_number LIKE "PPDB-TEST-%"');
     }
 
     // ─── Authentication Tests ──────────────────────────────────
@@ -196,7 +179,7 @@ class RegistrationApiTest extends TestCase
         $this->assertDatabaseHas('registrants', [
             'full_name' => 'DB Test',
             'email' => $email,
-        ], 'mysql');
+        ]);
     }
 
     public function test_store_generates_registration_number(): void
@@ -348,7 +331,7 @@ class RegistrationApiTest extends TestCase
         $reg = $this->createTestRegistration();
         $regId = $reg->id;
         $this->deleteJson("/api/registrations/{$regId}")->assertStatus(200);
-        $this->assertSoftDeleted('registrants', ['id' => $regId], 'mysql');
+        $this->assertSoftDeleted('registrants', ['id' => $regId]);
     }
 
     public function test_delete_nonexistent_returns_404(): void
@@ -571,7 +554,7 @@ class RegistrationApiTest extends TestCase
         $reg1 = $this->createTestRegistration(['registration_number' => 'PPDB-TEST-P1']);
         $reg2 = $this->createTestRegistration(['registration_number' => 'PPDB-TEST-P2']);
         $this->deleteJson("/api/registrations/{$reg1->id}")->assertStatus(200);
-        $this->assertDatabaseHas('registrants', ['registration_number' => 'PPDB-TEST-P2'], 'mysql');
+        $this->assertDatabaseHas('registrants', ['registration_number' => 'PPDB-TEST-P2']);
     }
 
     public function test_database_unchanged_after_read(): void

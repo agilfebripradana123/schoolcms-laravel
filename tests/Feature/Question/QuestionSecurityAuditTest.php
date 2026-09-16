@@ -17,24 +17,7 @@ class QuestionSecurityAuditTest extends TestCase
     {
         parent::setUp();
 
-        $this->app['config']->set('database.default', 'mysql');
-        $this->app['config']->set('database.connections.mysql', [
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => 'schoolcms_db',
-            'username' => 'root',
-            'password' => 'root',
-            'unix_socket' => '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_general_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ]);
 
-        $this->app['db']->purge('mysql');
 
         $this->cleanupTestQuestions();
     }
@@ -504,7 +487,7 @@ class QuestionSecurityAuditTest extends TestCase
         $question = $this->createTestQuestion(['question_text' => 'SEC-EMPTYBODY?']);
         $response = $this->putJson("/api/questions/{$question->id}", []);
         $response->assertStatus(200);
-        $this->assertDatabaseHas('question_banks', ['id' => $question->id], 'mysql');
+        $this->assertDatabaseHas('question_banks', ['id' => $question->id]);
     }
 
     public function test_store_rejects_invalid_subject_id(): void
@@ -725,7 +708,7 @@ class QuestionSecurityAuditTest extends TestCase
         $question = $this->createTestQuestion(['question_text' => 'SEC-FORCEDEL?']);
         $questionId = $question->id;
         $this->deleteJson("/api/questions/{$questionId}")->assertStatus(200);
-        $this->assertDatabaseHas('question_banks', ['id' => $questionId], 'mysql');
+        $this->assertDatabaseHas('question_banks', ['id' => $questionId]);
         $dbQuestion = QuestionBank::withTrashed()->find($questionId);
         $this->assertNotNull($dbQuestion->deleted_at);
     }
@@ -746,7 +729,7 @@ class QuestionSecurityAuditTest extends TestCase
     public function test_database_schema_unchanged(): void
     {
         $this->authenticateAsAdmin();
-        $columns = DB::connection('mysql')->select('SHOW COLUMNS FROM question_banks');
+        $columns = DB::connection()->select('SHOW COLUMNS FROM question_banks');
         $columnNames = array_column($columns, 'Field');
         $this->assertContains('id', $columnNames);
         $this->assertContains('subject_id', $columnNames);
