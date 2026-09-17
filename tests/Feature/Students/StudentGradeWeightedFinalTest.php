@@ -279,7 +279,7 @@ class StudentGradeWeightedFinalTest extends TestCase
         $this->assertTrue(is_int($row['final_score']) || is_float($row['final_score']) || is_null($row['final_score']));
     }
 
-    public function test_summary_unchanged(): void
+    public function test_summary_uses_weighted_finals(): void
     {
         $this->gradeFor($this->student1, 'tugas', 80.0);
         $this->gradeFor($this->student1, 'uts', 60.0);
@@ -293,7 +293,198 @@ class StudentGradeWeightedFinalTest extends TestCase
         $data = $summary->json('data');
 
         $this->assertSame(1, $data['total_subjects']);
-        $this->assertEquals(76.67, $data['average'], 'summary remains grades-backed equal mean');
-        $this->assertEquals(76.67, $data['highest'], 'single subject -> highest equals its equal mean');
+        $this->assertEquals(72.5, $data['average'], 'summary follows the canonical weighted final, not the grades mean');
+        $this->assertEquals(72.5, $data['highest'], 'single subject -> highest equals its weighted final');
+    }
+
+    public function test_summary_ignores_stale_grade_score(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 50.0);
+        $this->assessmentFor($this->student1, 'tugas', 90.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertSame(1, $data['total_subjects']);
+        $this->assertEquals(90.0, $data['average'], 'persisted stale bucket value must not shape the summary');
+        $this->assertEquals(90.0, $data['highest']);
+    }
+
+    public function test_summary_all_null_weights_use_equal_share(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+        $this->gradeFor($this->student1, 'uas', 90.0);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0);
+        $this->assessmentFor($this->student1, 'uas', 90.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertSame(1, $data['total_subjects']);
+        $this->assertEquals(76.67, $data['average']);
+        $this->assertEquals(76.67, $data['highest']);
+    }
+
+    public function test_summary_uniform_weights_keep_equal_share(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+        $this->gradeFor($this->student1, 'uas', 90.0);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0, 2.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0, 2.0);
+        $this->assessmentFor($this->student1, 'uas', 90.0, 2.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertEquals(76.67, $data['average']);
+        $this->assertEquals(76.67, $data['highest']);
+    }
+
+    public function test_summary_zero_weight_category_is_excluded(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+        $this->gradeFor($this->student1, 'uas', 90.0);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0, 1.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0, 0.0);
+        $this->assessmentFor($this->student1, 'uas', 90.0, 1.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertEquals(85.0, $data['average'], '(80 + 90) / 2, excluded zero-weight category');
+        $this->assertEquals(85.0, $data['highest']);
+    }
+
+    public function test_summary_all_zero_weights_yield_no_eligible_subject(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0, 0.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0, 0.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertSame(0, $data['total_subjects']);
+        $this->assertSame(0, $data['average']);
+        $this->assertSame(0, $data['highest']);
+    }
+
+    public function test_summary_missing_category_averages_present_only(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertEquals(70.0, $data['average'], '(80 + 60) / 2 over present categories');
+        $this->assertEquals(70.0, $data['highest']);
+    }
+
+    public function test_summary_no_assessments_is_empty(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 90.0);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertSame(0, $data['total_subjects']);
+        $this->assertSame(0, $data['average'], 'grades-backed buckets alone contribute nothing');
+        $this->assertSame(0, $data['highest']);
+    }
+
+    public function test_summary_averages_across_subject_finals(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+        $this->gradeFor($this->student1, 'uas', 90.0);
+
+        Grade::create([
+            'student_id' => $this->student1->id,
+            'subject_id' => $this->subject2->id,
+            'class_id' => $this->class1->id,
+            'type' => 'tugas',
+            'score' => 70.0,
+            'semester' => $this->semester1->name,
+            'academic_year' => $this->ay->name,
+            'semester_id' => $this->semester1->id,
+            'academic_year_id' => $this->ay->id,
+        ]);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0, 1.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0, 2.0);
+        $this->assessmentFor($this->student1, 'uas', 90.0, 1.0);
+        $this->assessmentFor($this->student1, 'tugas', 70.0, 1.0, $this->semester1, ['subject_id' => $this->subject2->id]);
+        $this->assessmentFor($this->student1, 'uts', 80.0, 1.0, $this->semester1, ['subject_id' => $this->subject2->id]);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertSame(2, $data['total_subjects']);
+        $this->assertEquals(73.75, $data['average'], '(72.5 + 75) / 2');
+        $this->assertEquals(75.0, $data['highest']);
+    }
+
+    public function test_summary_split_class_identities_are_independent(): void
+    {
+        $this->gradeFor($this->student1, 'uts', 100.0);
+
+        Grade::create([
+            'student_id' => $this->student1->id,
+            'subject_id' => $this->subject1->id,
+            'class_id' => $this->class2->id,
+            'type' => 'uts',
+            'score' => 0.0,
+            'semester' => $this->semester1->name,
+            'academic_year' => $this->ay->name,
+            'semester_id' => $this->semester1->id,
+            'academic_year_id' => $this->ay->id,
+        ]);
+
+        $this->assessmentFor($this->student1, 'uts', 100.0);
+        $this->assessmentFor($this->student1, 'uts', 0.0, null, $this->semester1, ['class_id' => $this->class2->id]);
+
+        $data = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+
+        $this->assertSame(2, $data['total_subjects'], 'class identity is part of the canonical tuple');
+        $this->assertEquals(50.0, $data['average'], '(100 + 0) / 2 across the two class identities');
+        $this->assertEquals(100.0, $data['highest']);
+    }
+
+    public function test_summary_period_filter_isolates_identities(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0, $this->semester1);
+        $this->gradeFor($this->student1, 'tugas', 100.0, $this->semester2);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0, null, $this->semester1);
+        $this->assessmentFor($this->student1, 'tugas', 100.0, null, $this->semester2);
+
+        $first = $this->getJson('/api/student/grades/summary?semester_id='.$this->semester1->id)->assertOk()->json('data');
+        $this->assertSame(1, $first['total_subjects']);
+        $this->assertEquals(80.0, $first['average']);
+
+        $second = $this->getJson('/api/student/grades/summary?semester_id='.$this->semester2->id)->assertOk()->json('data');
+        $this->assertSame(1, $second['total_subjects']);
+        $this->assertEquals(100.0, $second['average']);
+    }
+
+    public function test_summary_no_cross_period_mixing(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0, $this->semester1);
+        $this->gradeFor($this->student1, 'uas', 90.0, $this->semester1);
+        $this->gradeFor($this->student1, 'tugas', 100.0, $this->semester2);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0, null, $this->semester1);
+        $this->assessmentFor($this->student1, 'uas', 90.0, null, $this->semester1);
+        $this->assessmentFor($this->student1, 'tugas', 100.0, null, $this->semester2);
+
+        $unfiltered = $this->getJson('/api/student/grades/summary')->assertOk()->json('data');
+        $this->assertSame(2, $unfiltered['total_subjects'], 'semester identities never merge');
+        $this->assertEquals(92.5, $unfiltered['average'], '(85 + 100) / 2');
+        $this->assertEquals(100.0, $unfiltered['highest']);
     }
 }

@@ -104,25 +104,39 @@ class StudentGradeController extends Controller
 
         [$academicYear, $semester] = $this->periodFilters($validated);
 
+        [$academicYearId, $semesterId] = $this->canonicalPeriodIds($academicYear, $semester);
+
         $grades = Grade::where('student_id', $student->id)
             ->when($academicYear !== null, fn ($query) => $query->where($academicYear[0], $academicYear[1]))
             ->when($semester !== null, fn ($query) => $query->where($semester[0], $semester[1]))
             ->get();
 
-        // Group by subject to compute per-subject final scores
-        $grouped = $grades->groupBy(fn ($g) => $g->subject_id);
-        $finalScores = [];
+        // Canonical identities from the filtered grade rows. Multiple class or
+        // period identities for one subject are separate academic records.
+        $identityKeys = $grades
+            ->map(fn (Grade $grade) => $this->identityKey($grade))
+            ->unique()
+            ->values();
 
-        foreach ($grouped as $group) {
-            $scores = $group->pluck('score')->filter()->values();
-            if ($scores->isNotEmpty()) {
-                $finalScores[] = round($scores->sum() / $scores->count(), 2);
+        $finals = $this->aggregation->weightedFinalScoresForStudent(
+            $student->id,
+            $academicYearId,
+            $semesterId,
+        );
+
+        $contributed = [];
+
+        foreach ($identityKeys as $key) {
+            $final = $finals[$key] ?? null;
+
+            if ($final !== null) {
+                $contributed[] = (float) $final;
             }
         }
 
-        $totalSubjects = count($finalScores);
-        $average = $totalSubjects > 0 ? round(array_sum($finalScores) / $totalSubjects, 2) : 0;
-        $highest = $totalSubjects > 0 ? max($finalScores) : 0;
+        $totalSubjects = count($contributed);
+        $average = $totalSubjects > 0 ? round(array_sum($contributed) / $totalSubjects, 2) : 0;
+        $highest = $totalSubjects > 0 ? max($contributed) : 0;
 
         return response()->json([
             'success' => true,
@@ -180,5 +194,57 @@ class StudentGradeController extends Controller
         }
 
         return [$academicYear, $semester];
+    }
+
+    /**
+     * Resolve canonical period ids for assessment scoping.
+     *
+     * Legacy string aliases are mapped to ids only when unambiguous (semester
+     * name requires a known academic year); otherwise null is returned so the
+     * batch load covers the student scope and canonical identity grouping
+     * against the filtered grade rows selects the exact period.
+     *
+     * @return array{0: int|null, 1: int|null} academic_year_id, semester_id
+     */
+    private function canonicalPeriodIds(?array $academicYear, ?array $semester): array
+    {
+        $academicYearId = null;
+
+        if ($academicYear !== null) {
+            $academicYearId = $academicYear[0] === 'academic_year_id'
+                ? (int) $academicYear[1]
+                : AcademicYear::where('name', $academicYear[1])->value('id');
+        }
+
+        $semesterId = null;
+
+        if ($semester !== null) {
+            if ($semester[0] === 'semester_id') {
+                $semesterId = (int) $semester[1];
+            } elseif ($academicYearId !== null) {
+                $semesterId = Semester::where('academic_year_id', $academicYearId)
+                    ->where('name', $semester[1])
+                    ->value('id');
+            }
+        }
+
+        return [
+            $academicYearId !== null ? (int) $academicYearId : null,
+            $semesterId !== null ? (int) $semesterId : null,
+        ];
+    }
+
+    /**
+     * Canonical assessment identity key for one grade row.
+     * Mirrors GradeAggregationService::identityKey().
+     */
+    private function identityKey(Grade $grade): string
+    {
+        return implode('|', [
+            $grade->subject_id,
+            $grade->class_id,
+            $grade->academic_year_id,
+            $grade->semester_id,
+        ]);
     }
 }

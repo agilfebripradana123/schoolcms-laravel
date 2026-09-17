@@ -4,6 +4,7 @@ namespace Tests\Feature\Grade;
 
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\Grade;
+use App\Models\Academic\GradeAssessment;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
@@ -106,6 +107,27 @@ class StudentGradePeriodFilterTest extends TestCase
 
         $this->createGradeFor($this->resolvePeriod('2025/2026', '1'), 'uts', 85);
         $this->createGradeFor($this->resolvePeriod('2025/2026', '2'), 'tugas', 70);
+
+        // Canonical assessment evidence matching the grade rows so the summary
+        // derives its values from grade_assessments (Phase 2L-7B).
+        $this->createAssessmentFor($this->resolvePeriod('2025/2026', '1'), 'uts', 85);
+        $this->createAssessmentFor($this->resolvePeriod('2025/2026', '2'), 'tugas', 70);
+    }
+
+    private function createAssessmentFor(array $period, string $category, float $score): GradeAssessment
+    {
+        return GradeAssessment::create([
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'academic_year_id' => $period['academic_year_id'],
+            'semester_id' => $period['semester_id'],
+            'assessment_category' => $category,
+            'assessment_sequence' => 1,
+            'score' => $score,
+            'max_score' => 100.00,
+            'weight' => null,
+        ]);
     }
 
     private function createGradeFor(array $period, string $type, float $score): Grade
