@@ -668,9 +668,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     // =========================
-    // AUDIT LOGS (read-only, khusus admin)
+    // AUDIT LOGS (read-only, butuh permission view-audit-logs)
     // =========================
-    Route::middleware('role:Administrator,Super Admin')->group(function () {
+    Route::middleware('permission.strict:view-audit-logs')->group(function () {
         Route::get('/audit-logs', [AuditLogController::class, 'index']);
         Route::get('/audit-logs/{audit_log}', [AuditLogController::class, 'show']);
     });
@@ -686,9 +686,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     // =========================
-    // SETTINGS (khusus admin)
+    // SETTINGS (butuh permission manage-settings)
     // =========================
-    Route::middleware('role:Administrator,Super Admin')->group(function () {
+    Route::middleware('permission.strict:manage-settings')->group(function () {
         Route::get('/settings', [SettingController::class, 'index']);
         Route::get('/settings/{setting}', [SettingController::class, 'show']);
         Route::post('/settings', [SettingController::class, 'store']);

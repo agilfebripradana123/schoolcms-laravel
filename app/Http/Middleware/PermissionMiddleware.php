@@ -17,9 +17,15 @@ use Symfony\Component\HttpFoundation\Response;
  * Admin & Administrator roles bypass the check (superusers) so gating a route
  * with this middleware never locks out the administrative roles.
  *
+ * The `permission.strict` alias (StrictPermissionMiddleware) disables that
+ * bypass so an individual route can be gated purely by a permission — used by
+ * the Settings/Audit Logs routes, where Administrator must be denied for
+ * lacking `manage-settings`/`view-audit-logs`.
+ *
  * Usage (see bootstrap/app.php alias `permission`):
  *   ->middleware('permission:manage-facilities')
  *   ->middleware('permission:manage-facilities,view-reports')
+ *   ->middleware('permission.strict:manage-settings')   // no superuser bypass
  */
 class PermissionMiddleware
 {
@@ -35,8 +41,7 @@ class PermissionMiddleware
             ], 403);
         }
 
-        // Superusers always pass permission checks.
-        if (in_array($user->role?->name, ['Admin', 'Administrator'], true)) {
+        if ($this->shouldBypass($user)) {
             return $next($request);
         }
 
@@ -52,5 +57,14 @@ class PermissionMiddleware
         }
 
         return $next($request);
+    }
+
+    /**
+     * Administrative roles bypass the permission check by default so the
+     * reusable `permission:` middleware never locks them out.
+     */
+    protected function shouldBypass($user): bool
+    {
+        return in_array($user->role?->name, ['Admin', 'Administrator'], true);
     }
 }
