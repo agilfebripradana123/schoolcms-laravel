@@ -184,6 +184,63 @@ class GradeAggregationService
     }
 
     /**
+     * Derive the canonical weighted finals for every academic identity of a
+     * matched student population in bulk (Phase 2L-7E Stage B).
+     *
+     * One grade_assessments query covers the whole population scope; identities
+     * (including student_id) are grouped in memory and evaluated with the exact
+     * weightedFinalScore() semantics. No per-student, per-subject or per-identity
+     * database queries are issued. NULL indicates no eligible weighted final.
+     *
+     * @param  array<int, int>  $studentIds
+     * @return array<string, float|null> keyed by student_id|subject_id|class_id|academic_year_id|semester_id
+     */
+    public function weightedFinalScoresForStudentPopulation(
+        array $studentIds,
+        ?int $classId = null,
+        ?int $subjectId = null,
+        ?int $academicYearId = null,
+        ?int $semesterId = null,
+    ): array {
+        if ($studentIds === []) {
+            return [];
+        }
+
+        $query = GradeAssessment::query()->whereIn('student_id', $studentIds);
+
+        if ($classId !== null) {
+            $query->where('class_id', $classId);
+        }
+
+        if ($subjectId !== null) {
+            $query->where('subject_id', $subjectId);
+        }
+
+        if ($academicYearId !== null) {
+            $query->where('academic_year_id', $academicYearId);
+        }
+
+        if ($semesterId !== null) {
+            $query->where('semester_id', $semesterId);
+        }
+
+        $assessments = $query->get();
+
+        $results = [];
+
+        foreach ($assessments->groupBy(
+            fn (GradeAssessment $assessment) => $this->populationIdentityKey($assessment)
+        ) as $key => $group) {
+            $results[$key] = $this->weightedFromBuckets(
+                $this->aggregateFromAssessments($group),
+                $group,
+            )['weighted_final_score'];
+        }
+
+        return $results;
+    }
+
+    /**
      * Derive the canonical weighted finals for every academic identity of one
      * student in a single assessment query (Phase 2L-7B).
      *
@@ -307,6 +364,17 @@ class GradeAggregationService
     private function identityKey(GradeAssessment $assessment): string
     {
         return implode('|', [
+            $assessment->subject_id,
+            $assessment->class_id,
+            $assessment->academic_year_id,
+            $assessment->semester_id,
+        ]);
+    }
+
+    private function populationIdentityKey(GradeAssessment $assessment): string
+    {
+        return implode('|', [
+            $assessment->student_id,
             $assessment->subject_id,
             $assessment->class_id,
             $assessment->academic_year_id,
