@@ -243,6 +243,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/grade-assessments/{assessment}', [GradeAssessmentController::class, 'show']);
         Route::put('/grade-assessments/{assessment}', [GradeAssessmentController::class, 'update']);
         Route::delete('/grade-assessments/{assessment}', [GradeAssessmentController::class, 'destroy']);
+        Route::post('/grade-assessments/aggregate', [GradeAssessmentController::class, 'aggregate']);
     });
 
     // =========================

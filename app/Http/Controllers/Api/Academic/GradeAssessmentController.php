@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Api\Academic;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Academic\AggregateGradeScoreRequest;
 use App\Http\Requests\Api\Academic\StoreGradeAssessmentRequest;
 use App\Http\Requests\Api\Academic\UpdateGradeAssessmentRequest;
 use App\Http\Resources\Academic\GradeAssessmentResource;
+use App\Models\Academic\Grade;
 use App\Models\Academic\GradeAssessment;
+use App\Services\Academic\GradeAggregationService;
 use App\Services\Academic\GradeAssessmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,9 +18,12 @@ class GradeAssessmentController extends Controller
 {
     private $service;
 
-    public function __construct(GradeAssessmentService $service)
+    private GradeAggregationService $aggregation;
+
+    public function __construct(GradeAssessmentService $service, GradeAggregationService $aggregation)
     {
         $this->service = $service;
+        $this->aggregation = $aggregation;
     }
 
     /**
@@ -93,7 +99,7 @@ class GradeAssessmentController extends Controller
         $assessment = GradeAssessment::with(['student', 'subject', 'schoolClass', 'academicYear', 'semester'])
             ->find($id);
 
-        if (!$assessment) {
+        if (! $assessment) {
             return response()->json([
                 'success' => false,
                 'message' => 'Asesmen tidak ditemukan',
@@ -115,7 +121,7 @@ class GradeAssessmentController extends Controller
     {
         $assessment = GradeAssessment::find($id);
 
-        if (!$assessment) {
+        if (! $assessment) {
             return response()->json([
                 'success' => false,
                 'message' => 'Asesmen tidak ditemukan',
@@ -143,7 +149,7 @@ class GradeAssessmentController extends Controller
     {
         $assessment = GradeAssessment::find($id);
 
-        if (!$assessment) {
+        if (! $assessment) {
             return response()->json([
                 'success' => false,
                 'message' => 'Asesmen tidak ditemukan',
@@ -153,7 +159,7 @@ class GradeAssessmentController extends Controller
 
         $canDelete = $this->service->delete($assessment);
 
-        if (!$canDelete) {
+        if (! $canDelete) {
             return response()->json([
                 'success' => false,
                 'message' => 'Asesmen tidak dapat dihapus karena sudah finalisasi.',
@@ -165,6 +171,59 @@ class GradeAssessmentController extends Controller
             'success' => true,
             'message' => 'Assessment deleted successfully',
             'data' => null,
+        ]);
+    }
+
+    /**
+     * POST /api/grade-assessments/aggregate
+     * Explicitly synchronize the derived bucket scores into the matching Grade
+     * rows for one canonical identity (Phase 2L-3 Stage 3D).
+     *
+     * Identity is the 5 canonical ids only; the aggregation formula is never
+     * accepted from the client. Locked targets surface the existing 422
+     * GradeMutationGuard envelope untouched.
+     */
+    public function aggregate(AggregateGradeScoreRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        $studentId = (int) $validated['student_id'];
+        $subjectId = (int) $validated['subject_id'];
+        $classId = (int) $validated['class_id'];
+        $academicYearId = (int) $validated['academic_year_id'];
+        $semesterId = (int) $validated['semester_id'];
+
+        $derived = $this->aggregation->synchronizeScore(
+            $studentId,
+            $subjectId,
+            $classId,
+            $academicYearId,
+            $semesterId,
+        );
+
+        $present = array_keys($derived);
+        $updated = 0;
+
+        if ($present !== []) {
+            $updated = Grade::where('student_id', $studentId)
+                ->where('subject_id', $subjectId)
+                ->where('class_id', $classId)
+                ->where('academic_year_id', $academicYearId)
+                ->where('semester_id', $semesterId)
+                ->whereIn('type', $present)
+                ->count();
+        }
+
+        $skipped = count($present) - $updated;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Grade scores aggregated successfully',
+            'data' => [
+                'derived' => $derived,
+                'grades_updated' => $updated,
+                'grades_skipped' => $skipped,
+            ],
         ]);
     }
 }
