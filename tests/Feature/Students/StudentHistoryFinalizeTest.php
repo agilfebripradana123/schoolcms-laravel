@@ -3,13 +3,19 @@
 namespace Tests\Feature\Students;
 
 use App\Models\Academic\AcademicYear;
+use App\Models\Academic\ClassSubject;
+use App\Models\Academic\GradeAssessment;
 use App\Models\Academic\ReportCard;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
+use App\Models\Academic\Subject;
 use App\Models\Students\Student;
 use App\Models\Students\StudentHistory;
+use App\Models\System\AuditLog;
 use App\Models\System\Role;
+use App\Models\System\Setting;
 use App\Models\System\User;
+use App\Services\Students\AcademicOutcomeEligibilityService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
@@ -113,8 +119,60 @@ class StudentHistoryFinalizeTest extends TestCase
             $t->dateTime('published_at')->nullable();
             $t->timestamps();
         });
-        // Placeholders only — verified rows must never appear (side-effect isolation).
-        foreach (['grades', 'grade_assessments', 'class_students', 'alumni', 'transfers'] as $table) {
+        Schema::create('audit_logs', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('user_id');
+            $t->string('action');
+            $t->string('model');
+            $t->unsignedBigInteger('model_id');
+            $t->text('description')->nullable();
+            $t->string('ip_address', 45)->nullable();
+            $t->string('user_agent')->nullable();
+            $t->timestamp('created_at')->nullable();
+        });
+        Schema::create('settings', function (Blueprint $t) {
+            $t->id();
+            $t->string('group', 50)->nullable();
+            $t->string('key')->unique();
+            $t->text('value')->nullable();
+            $t->string('type', 20)->default('string');
+            $t->text('description')->nullable();
+            $t->boolean('is_encrypted')->default(false);
+            $t->boolean('is_public')->default(false);
+            $t->unsignedInteger('sort_order')->default(0);
+            $t->timestamps();
+        });
+        Schema::create('subjects', function (Blueprint $t) {
+            $t->id();
+            $t->string('code');
+            $t->string('name');
+            $t->string('type')->default('wajib');
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        Schema::create('class_subjects', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('teacher_id')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('grade_assessments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->string('assessment_category', 50);
+            $t->unsignedInteger('assessment_sequence');
+            $t->decimal('score', 5, 2);
+            $t->decimal('max_score', 5, 2)->default(100);
+            $t->decimal('weight', 5, 2)->nullable();
+            $t->timestamps();
+        });
+        // Side-effect placeholders — must stay 0 post-finalization.
+        foreach (['grades', 'class_students', 'alumni', 'transfers'] as $table) {
             Schema::create($table, function (Blueprint $t) {
                 $t->id();
             });
@@ -383,5 +441,129 @@ class StudentHistoryFinalizeTest extends TestCase
             'academic_year_id' => $this->academicYearId,
             'status' => 'tinggal',
         ])->assertStatus(422);
+    }
+
+    // ─── PHASE 2M-2I ADDITIONS ────────────────────────────────────
+
+    public function test_successful_finalization_creates_exactly_one_audit_log(): void
+    {
+        $this->card();
+        $history = $this->history();
+
+        $this->assertDatabaseCount('audit_logs', 0);
+        $this->postJson("/api/student-histories/{$history->id}/finalize")->assertStatus(200);
+        $this->assertDatabaseCount('audit_logs', 1);
+    }
+
+    public function test_audit_records_actor_and_identity(): void
+    {
+        $this->card();
+        $history = $this->history();
+        $this->postJson("/api/student-histories/{$history->id}/finalize")->assertStatus(200);
+
+        $log = AuditLog::first();
+        $this->assertSame($this->admin->id, $log->user_id);
+        $this->assertSame('student_history_finalized', $log->action);
+        $this->assertSame('StudentHistory', $log->model);
+        $this->assertSame($history->id, $log->model_id);
+        $this->assertStringContainsString($history->status, $log->description);
+    }
+
+    public function test_decision_reason_is_recorded_in_history_and_audit(): void
+    {
+        $this->card();
+        $history = $this->history();
+
+        $this->postJson("/api/student-histories/{$history->id}/finalize", [
+            'notes' => 'Approved after review.',
+        ])->assertStatus(200);
+
+        $row = StudentHistory::find($history->id);
+        $this->assertSame('Approved after review.', $row->notes);
+        $this->assertStringContainsString('Approved after review.', AuditLog::first()->description);
+    }
+
+    public function test_failed_finalization_does_not_create_audit(): void
+    {
+        $this->card('draft');
+        $history = $this->history();
+
+        $this->assertLocked422($this->postJson("/api/student-histories/{$history->id}/finalize"));
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_already_finalized_attempt_does_not_duplicate_audit(): void
+    {
+        $this->card();
+        $history = $this->history();
+        $this->postJson("/api/student-histories/{$history->id}/finalize")->assertStatus(200);
+        $this->assertDatabaseCount('audit_logs', 1);
+
+        $this->assertLocked422($this->postJson("/api/student-histories/{$history->id}/finalize"));
+        $this->assertDatabaseCount('audit_logs', 1);
+    }
+
+    public function test_advisory_ineligible_does_not_block_explicit_finalization(): void
+    {
+        $this->card();
+        $history = $this->history();
+
+        $eligibility = app(AcademicOutcomeEligibilityService::class);
+        $result = $eligibility->evaluate($this->studentId, $this->classId, $this->academicYearId, $this->semester2Id);
+        $this->assertFalse($result['eligible'], 'precondition: evaluator reports ineligible');
+
+        $this->postJson("/api/student-histories/{$history->id}/finalize")->assertStatus(200);
+        $this->assertTrue(StudentHistory::find($history->id)->is_final);
+    }
+
+    public function test_advisory_eligible_does_not_auto_finalize(): void
+    {
+        $mtk = Subject::create(['code' => 'MTK', 'name' => 'Matematika']);
+        ClassSubject::create(['class_id' => $this->classId, 'subject_id' => $mtk->id]);
+        GradeAssessment::create([
+            'student_id' => $this->studentId,
+            'subject_id' => $mtk->id,
+            'class_id' => $this->classId,
+            'academic_year_id' => $this->academicYearId,
+            'semester_id' => $this->semester2Id,
+            'assessment_category' => 'tugas',
+            'assessment_sequence' => 1,
+            'score' => 80.00,
+            'max_score' => 100.00,
+            'weight' => null,
+        ]);
+        $this->policyRow('min_completeness_pct', 'integer', '50');
+        $history = $this->history();
+
+        $result = app(AcademicOutcomeEligibilityService::class)
+            ->evaluate($this->studentId, $this->classId, $this->academicYearId, $this->semester2Id);
+        $this->assertTrue($result['eligible'], 'precondition: evaluator reports eligible');
+
+        $this->assertFalse(StudentHistory::find($history->id)->is_final, 'evaluator must not auto-finalize');
+    }
+
+    public function test_outcome_selection_remains_explicit_admin_decision(): void
+    {
+        $this->card();
+        $history = $this->history();
+
+        $result = app(AcademicOutcomeEligibilityService::class)
+            ->evaluate($this->studentId, $this->classId, $this->academicYearId, $this->semester2Id);
+        $this->assertNull($result['outcome']);
+
+        $this->assertSame('naik', StudentHistory::find($history->id)->status, 'admin selected status persists');
+        $this->postJson("/api/student-histories/{$history->id}/finalize")->assertStatus(200);
+        $this->assertTrue(StudentHistory::find($history->id)->is_final);
+    }
+
+    private function policyRow(string $key, string $type, ?string $value): void
+    {
+        Setting::create([
+            'group' => 'academic_outcome',
+            'key' => $key,
+            'type' => $type,
+            'value' => $value,
+            'is_public' => false,
+        ]);
     }
 }

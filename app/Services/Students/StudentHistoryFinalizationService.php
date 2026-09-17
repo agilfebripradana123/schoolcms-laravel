@@ -5,6 +5,7 @@ namespace App\Services\Students;
 use App\Models\Academic\ReportCard;
 use App\Models\Academic\Semester;
 use App\Models\Students\StudentHistory;
+use App\Models\System\AuditLog;
 use App\Models\System\User;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
@@ -27,9 +28,14 @@ use Illuminate\Support\Facades\DB;
  */
 class StudentHistoryFinalizationService
 {
-    public function finalize(StudentHistory $history, User $actor): StudentHistory
-    {
-        return DB::transaction(function () use ($history, $actor) {
+    public function finalize(
+        StudentHistory $history,
+        User $actor,
+        ?string $decisionReason = null,
+        ?string $ipAddress = null,
+        ?string $userAgent = null,
+    ): StudentHistory {
+        return DB::transaction(function () use ($history, $actor, $decisionReason, $ipAddress, $userAgent) {
             $locked = StudentHistory::query()
                 ->whereKey($history->getKey())
                 ->lockForUpdate()
@@ -73,7 +79,25 @@ class StudentHistoryFinalizationService
             $locked->is_final = true;
             $locked->finalized_at = now();
             $locked->finalized_by = (int) $actor->id;
+
+            if ($decisionReason !== null) {
+                $locked->notes = $decisionReason;
+            }
+
             $locked->save();
+
+            AuditLog::create([
+                'user_id' => $actor->id,
+                'action' => 'student_history_finalized',
+                'model' => 'StudentHistory',
+                'model_id' => $locked->id,
+                'description' => json_encode(array_filter([
+                    'status' => $locked->status,
+                    'decision_reason' => $decisionReason,
+                ])),
+                'ip_address' => $ipAddress,
+                'user_agent' => $userAgent,
+            ]);
 
             return $locked->fresh();
         });

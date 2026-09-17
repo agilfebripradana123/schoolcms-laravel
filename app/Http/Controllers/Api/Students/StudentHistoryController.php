@@ -130,6 +130,8 @@ class StudentHistoryController extends Controller
 
     public function finalize(Request $request, int $id): JsonResponse
     {
+        $validated = $request->validate(['notes' => 'nullable|string|max:255']);
+
         $history = StudentHistory::find($id);
 
         if (! $history) {
@@ -140,7 +142,13 @@ class StudentHistoryController extends Controller
             ], 404);
         }
 
-        $history = app(StudentHistoryFinalizationService::class)->finalize($history, $request->user());
+        $history = app(StudentHistoryFinalizationService::class)->finalize(
+            $history,
+            $request->user(),
+            $validated['notes'] ?? null,
+            $request->ip(),
+            $request->userAgent(),
+        );
         $history->load(['student', 'schoolClass', 'academicYear']);
 
         return response()->json([
