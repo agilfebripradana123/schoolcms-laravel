@@ -12,7 +12,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('users', function (Blueprint $table) {
-            $table->id();
+            // INT UNSIGNED (increments) — matches the production schema
+            // (schoolcms_db.sql users.id = int unsigned) and every raw-SQL FK
+            // that references users.id (students, teachers, notifications,
+            // finance, permission_user). The default bigint breaks those FKs
+            // on a fresh migrate. See PHASE RBAC FOUNDATION Phase A.
+            $table->increments('id');
             $table->string('name');
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
