@@ -100,18 +100,17 @@ class ExamGradeIntegrationService
 
         $score = (float) $result->percentage;
 
-        // Phase 2J: never overwrite an already-finalized (or published-report-
-        // card locked) academic Grade for this slot.
-        $existing = Grade::where('student_id', $student->id)
-            ->where('subject_id', $subject->id)
-            ->where('class_id', $classId)
-            ->where('type', $type)
-            ->where('semester_id', $exam->semester_id)
-            ->where('academic_year_id', $exam->academic_year_id)
-            ->first();
-        if ($existing) {
-            app(GradeMutationGuard::class)->assertMutable($existing);
-        }
+        // Phase 2J + 2L-7F: never overwrite or create an academic Grade in a
+        // finalized (or published-report-card locked) slot, even when the
+        // bucket Grade row does not exist yet.
+        app(GradeMutationGuard::class)->assertSlotMutable(
+            $student->id,
+            $subject->id,
+            $classId,
+            $exam->academic_year_id,
+            $exam->semester_id,
+            $type,
+        );
 
         $grade = DB::transaction(function () use ($result, $student, $subject, $classId, $type, $exam, $score) {
             $grade = Grade::updateOrCreate(
@@ -150,7 +149,7 @@ class ExamGradeIntegrationService
                     'source_type' => 'exam_result',
                     'source_id' => $result->id,
                     'assessed_date' => $result->updated_at?->toDateString(),
-                    'notes' => 'Synced from ExamResult#' . $result->id,
+                    'notes' => 'Synced from ExamResult#'.$result->id,
                 ]
             );
 

@@ -6,6 +6,7 @@ use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
 use App\Models\Academic\GradeAssessment;
+use App\Models\Academic\ReportCard;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
@@ -481,6 +482,52 @@ class ExamGradeIntegrationTest extends TestCase
         $this->assertSame($this->ay->id, $assessment->academic_year_id);
         $this->assertSame(100.0, (float) $assessment->score);
         $this->assertSame($resultId, $assessment->source_id);
+    }
+
+    public function test_sync_rejected_when_published_report_card_without_grade(): void
+    {
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit");
+        $resultId = ExamResult::where('participant_id', $this->participantMC->id)->value('id');
+
+        ReportCard::create([
+            'student_id' => $this->studentA->id,
+            'class_id' => $this->class1->id,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+
+        $this->adminSync($resultId)->assertStatus(422)->assertJson(['success' => false, 'data' => null]);
+
+        $this->assertSame(0, Grade::count(), 'no grade row created into a published-card slot');
+        $this->assertSame(0, GradeAssessment::count(), 'no assessment evidence written into a published-card slot');
+    }
+
+    public function test_sync_allowed_when_published_report_card_is_other_class(): void
+    {
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit");
+        $resultId = ExamResult::where('participant_id', $this->participantMC->id)->value('id');
+
+        $otherClass = SchoolClass::create(['name' => 'Other', 'level' => '7']);
+
+        ReportCard::create([
+            'student_id' => $this->studentA->id,
+            'class_id' => $otherClass->id,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+
+        $this->adminSync($resultId)->assertStatus(200);
+        $this->assertSame(1, Grade::count());
     }
 
     public function test_repeated_sync_is_idempotent(): void

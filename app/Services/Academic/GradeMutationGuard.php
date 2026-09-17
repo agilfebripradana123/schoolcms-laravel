@@ -23,6 +23,54 @@ use Illuminate\Http\Exceptions\HttpResponseException;
  */
 class GradeMutationGuard
 {
+    /**
+     * Guard an academic slot, resolving the existing Grade row when present and
+     * falling back to a detached slot shell otherwise (Phase 2L-7F).
+     *
+     * A published ReportCard locks the whole (student, class, academic_year,
+     * semester) slot, so a missing Grade row must not bypass the lock. The shell
+     * is never persisted; it only carries the slot identity through isLocked().
+     *
+     * @throws HttpResponseException when the slot is locked
+     */
+    public function assertSlotMutable(
+        int $studentId,
+        int $subjectId,
+        int $classId,
+        int $academicYearId,
+        int $semesterId,
+        ?string $type = null,
+    ): void {
+        $query = Grade::query()
+            ->where('student_id', $studentId)
+            ->where('subject_id', $subjectId)
+            ->where('class_id', $classId)
+            ->where('academic_year_id', $academicYearId)
+            ->where('semester_id', $semesterId);
+
+        if ($type !== null) {
+            $query->where('type', $type);
+        }
+
+        $grade = $query->first();
+
+        $this->assertMutable($grade ?? $this->slotShell($studentId, $classId, $academicYearId, $semesterId));
+    }
+
+    /**
+     * Detached, never-persisted Grade carrying only the slot identity.
+     */
+    public function slotShell(int $studentId, int $classId, int $academicYearId, int $semesterId): Grade
+    {
+        $shell = new Grade;
+        $shell->student_id = $studentId;
+        $shell->class_id = $classId;
+        $shell->academic_year_id = $academicYearId;
+        $shell->semester_id = $semesterId;
+
+        return $shell;
+    }
+
     public function isLocked(Grade $grade): bool
     {
         if ($grade->is_final) {

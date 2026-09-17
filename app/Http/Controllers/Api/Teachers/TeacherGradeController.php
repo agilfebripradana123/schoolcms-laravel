@@ -9,8 +9,8 @@ use App\Models\Academic\Grade;
 use App\Models\Academic\Semester;
 use App\Models\Staff\TeacherAssignment;
 use App\Services\Academic\GradeMutationGuard;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
@@ -34,33 +34,36 @@ class TeacherGradeController extends Controller
      */
     private function resolveAcademicYear(array $input, array &$scope, &$yearName)
     {
-        if (!empty($input['academic_year_id'])) {
+        if (! empty($input['academic_year_id'])) {
             $year = AcademicYear::find((int) $input['academic_year_id']);
-            if (!$year) {
+            if (! $year) {
                 return null;
             }
             $scope['academic_year_id'] = $year->id;
             $yearName = $year->name;
+
             return $year;
         }
 
-        if (!empty($input['academic_year'])) {
+        if (! empty($input['academic_year'])) {
             $year = AcademicYear::where('name', $input['academic_year'])->first();
-            if (!$year) {
+            if (! $year) {
                 return null;
             }
             $scope['academic_year_id'] = $year->id;
             $yearName = $year->name;
+
             return $year;
         }
 
         // Default ke tahun aktif.
         $year = AcademicYear::where('is_active', true)->first();
-        if (!$year) {
+        if (! $year) {
             return null;
         }
         $scope['academic_year_id'] = $year->id;
         $yearName = $year->name;
+
         return $year;
     }
 
@@ -73,10 +76,10 @@ class TeacherGradeController extends Controller
      */
     private function resolveSemester(array $input, AcademicYear $year): array
     {
-        if (!empty($input['semester_id'])) {
+        if (! empty($input['semester_id'])) {
             $semester = Semester::find((int) $input['semester_id']);
 
-            if (!$semester) {
+            if (! $semester) {
                 return ['error' => 'Semester not found'];
             }
 
@@ -84,7 +87,7 @@ class TeacherGradeController extends Controller
                 return ['error' => 'The selected semester does not belong to the selected academic year.'];
             }
 
-            if (!empty($input['semester']) && $semester->name !== $input['semester']) {
+            if (! empty($input['semester']) && $semester->name !== $input['semester']) {
                 return ['error' => 'The semester value conflicts with semester_id.'];
             }
 
@@ -95,7 +98,7 @@ class TeacherGradeController extends Controller
             ->where('name', $input['semester'])
             ->first();
 
-        if (!$semester) {
+        if (! $semester) {
             return ['error' => 'The selected semester does not exist for the selected academic year.'];
         }
 
@@ -110,7 +113,7 @@ class TeacherGradeController extends Controller
     {
         $teacher = $this->teacher($request);
 
-        if (!$teacher) {
+        if (! $teacher) {
             return $this->forbidden();
         }
 
@@ -132,7 +135,7 @@ class TeacherGradeController extends Controller
 
         $year = $this->resolveAcademicYear($validated, $scope, $yearName);
 
-        if (!$year) {
+        if (! $year) {
             return response()->json(['success' => false, 'message' => 'Academic year not found', 'data' => null], 404);
         }
 
@@ -142,7 +145,7 @@ class TeacherGradeController extends Controller
             return response()->json(['success' => false, 'message' => $semesterInfo['error'], 'data' => null], 422);
         }
 
-        if (!TeacherAssignment::where($scope)->exists()) {
+        if (! TeacherAssignment::where($scope)->exists()) {
             return response()->json(['success' => false, 'message' => 'Scope not found', 'data' => null], 404);
         }
 
@@ -203,7 +206,7 @@ class TeacherGradeController extends Controller
     {
         $teacher = $this->teacher($request);
 
-        if (!$teacher) {
+        if (! $teacher) {
             return $this->forbidden();
         }
 
@@ -228,7 +231,7 @@ class TeacherGradeController extends Controller
 
         $year = $this->resolveAcademicYear($validated, $scope, $yearName);
 
-        if (!$year) {
+        if (! $year) {
             return response()->json(['success' => false, 'message' => 'Academic year not found', 'data' => null], 404);
         }
 
@@ -238,7 +241,7 @@ class TeacherGradeController extends Controller
             return response()->json(['success' => false, 'message' => $semesterInfo['error'], 'data' => null], 422);
         }
 
-        if (!TeacherAssignment::where($scope)->exists()) {
+        if (! TeacherAssignment::where($scope)->exists()) {
             return response()->json(['success' => false, 'message' => 'Scope not found', 'data' => null], 404);
         }
 
@@ -257,22 +260,21 @@ class TeacherGradeController extends Controller
             foreach ($validated['items'] as $item) {
                 $studentId = (int) $item['student_id'];
 
-                if (!isset($allowedSet[$studentId])) {
+                if (! isset($allowedSet[$studentId])) {
                     abort(422, "Siswa #{$studentId} bukan anggota kelas yang diizinkan.");
                 }
 
-                // Phase 2J: a finalized (or published-report-card locked) grade
-                // cannot be overwritten by a bulk upsert.
-                $existing = Grade::where('student_id', $studentId)
-                    ->where('subject_id', $subjectId)
-                    ->where('class_id', $classId)
-                    ->where('type', $type)
-                    ->where('semester_id', $semesterInfo['semester_id'])
-                    ->where('academic_year_id', $year->id)
-                    ->first();
-                if ($existing) {
-                    app(GradeMutationGuard::class)->assertMutable($existing);
-                }
+                // Phase 2J + 2L-7F: a finalized (or published-report-card
+                // locked) slot cannot be overwritten, even when no bucket row
+                // exists yet.
+                app(GradeMutationGuard::class)->assertSlotMutable(
+                    $studentId,
+                    $subjectId,
+                    $classId,
+                    $year->id,
+                    $semesterInfo['semester_id'],
+                    $type,
+                );
 
                 Grade::updateOrCreate(
                     [

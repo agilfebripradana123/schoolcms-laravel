@@ -38,12 +38,22 @@ class StudentGradeController extends Controller
 
         [$academicYear, $semester] = $this->periodFilters($validated);
 
+        [$academicYearId, $semesterId] = $this->canonicalPeriodIds($academicYear, $semester);
+
         $grades = Grade::with(['subject', 'schoolClass'])
             ->where('student_id', $student->id)
             ->when($academicYear !== null, fn ($query) => $query->where($academicYear[0], $academicYear[1]))
             ->when($semester !== null, fn ($query) => $query->where($semester[0], $semester[1]))
             ->orderBy('subject_id')
             ->get();
+
+        // Batch-canonical weighted finals for the whole student scope in one
+        // assessment query; per-group lookups are in-memory (Phase 2L-7F).
+        $finals = $this->aggregation->weightedFinalScoresForStudent(
+            $student->id,
+            $academicYearId,
+            $semesterId,
+        );
 
         // Group by subject: pivot tugas/uts/uas per subject+semester+year
         $rows = collect();
@@ -68,18 +78,10 @@ class StudentGradeController extends Controller
                 $row[$g->type] = (float) $g->score;
             }
 
-            // Final score: assessment-derived canonical weighted final (Phase 2L-5).
+            // Final score: assessment-derived canonical weighted final.
             // Read-only derivation from grade_assessments; never falls back to
             // grades.score, which remains the persisted bucket-value source above.
-            $derived = $this->aggregation->weightedFinalScore(
-                $student->id,
-                $first->subject_id,
-                $first->class_id,
-                $first->academic_year_id,
-                $first->semester_id
-            );
-
-            $row['final_score'] = $derived['weighted_final_score'];
+            $row['final_score'] = $finals[$this->identityKey($first)] ?? null;
 
             $rows->push($row);
         }

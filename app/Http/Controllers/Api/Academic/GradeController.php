@@ -18,7 +18,7 @@ use Illuminate\Validation\ValidationException;
 
 class GradeController extends Controller
 {
-    public function index(\Illuminate\Http\Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'student_id' => 'nullable|integer',
@@ -35,19 +35,19 @@ class GradeController extends Controller
 
         $query = Grade::with(['student', 'subject', 'schoolClass']);
 
-        if (!empty($validated['student_id'])) {
+        if (! empty($validated['student_id'])) {
             $query->where('student_id', $validated['student_id']);
         }
 
-        if (!empty($validated['subject_id'])) {
+        if (! empty($validated['subject_id'])) {
             $query->where('subject_id', $validated['subject_id']);
         }
 
-        if (!empty($validated['class_id'])) {
+        if (! empty($validated['class_id'])) {
             $query->where('class_id', $validated['class_id']);
         }
 
-        if (!empty($validated['type'])) {
+        if (! empty($validated['type'])) {
             $query->where('type', $validated['type']);
         }
 
@@ -74,7 +74,7 @@ class GradeController extends Controller
         $grade = Grade::with(['student', 'subject', 'schoolClass'])
             ->find($id);
 
-        if (!$grade) {
+        if (! $grade) {
             return response()->json([
                 'success' => false,
                 'message' => 'Grade not found',
@@ -109,6 +109,15 @@ class GradeController extends Controller
                 ]);
             }
 
+            app(GradeMutationGuard::class)->assertSlotMutable(
+                (int) $validated['student_id'],
+                (int) $validated['subject_id'],
+                (int) $validated['class_id'],
+                (int) $validated['academic_year_id'],
+                (int) $validated['semester_id'],
+                $validated['type'],
+            );
+
             return Grade::create($validated);
         });
 
@@ -125,7 +134,7 @@ class GradeController extends Controller
     {
         $grade = Grade::find($id);
 
-        if (!$grade) {
+        if (! $grade) {
             return response()->json([
                 'success' => false,
                 'message' => 'Grade not found',
@@ -182,7 +191,7 @@ class GradeController extends Controller
     {
         $grade = Grade::find($id);
 
-        if (!$grade) {
+        if (! $grade) {
             return response()->json([
                 'success' => false,
                 'message' => 'Grade not found',
@@ -203,7 +212,7 @@ class GradeController extends Controller
 
     private function appendPeriodFilters($query, array $validated): void
     {
-        if (!empty($validated['academic_year_id']) && !empty($validated['academic_year'])) {
+        if (! empty($validated['academic_year_id']) && ! empty($validated['academic_year'])) {
             $name = AcademicYear::where('id', $validated['academic_year_id'])->value('name');
 
             if ($name !== null && $name !== $validated['academic_year']) {
@@ -213,7 +222,7 @@ class GradeController extends Controller
             }
         }
 
-        if (!empty($validated['semester_id']) && !empty($validated['semester'])) {
+        if (! empty($validated['semester_id']) && ! empty($validated['semester'])) {
             $name = Semester::where('id', $validated['semester_id'])->value('name');
 
             if ($name !== null && $name !== $validated['semester']) {
@@ -223,15 +232,15 @@ class GradeController extends Controller
             }
         }
 
-        if (!empty($validated['academic_year_id'])) {
+        if (! empty($validated['academic_year_id'])) {
             $query->where('academic_year_id', $validated['academic_year_id']);
-        } elseif (!empty($validated['academic_year'])) {
+        } elseif (! empty($validated['academic_year'])) {
             $query->where('academic_year', $validated['academic_year']);
         }
 
-        if (!empty($validated['semester_id'])) {
+        if (! empty($validated['semester_id'])) {
             $query->where('semester_id', $validated['semester_id']);
-        } elseif (!empty($validated['semester'])) {
+        } elseif (! empty($validated['semester'])) {
             $query->where('semester', $validated['semester']);
         }
     }
@@ -245,7 +254,7 @@ class GradeController extends Controller
     {
         $grade = Grade::find($id);
 
-        if (!$grade) {
+        if (! $grade) {
             return response()->json([
                 'success' => false,
                 'message' => 'Grade not found',
@@ -271,7 +280,7 @@ class GradeController extends Controller
     {
         $grade = Grade::find($id);
 
-        if (!$grade) {
+        if (! $grade) {
             return response()->json([
                 'success' => false,
                 'message' => 'Grade not found',

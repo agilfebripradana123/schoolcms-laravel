@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassStudent;
 use App\Models\Academic\Grade;
+use App\Models\Academic\ReportCard;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
@@ -152,6 +153,17 @@ class TeacherGradeDataScopeTest extends TestCase
             $t->unsignedBigInteger('semester_id');
             $t->timestamps();
         });
+        Schema::create('report_cards', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->text('teacher_notes')->nullable();
+            $t->string('status')->default('draft');
+            $t->dateTime('published_at')->nullable();
+            $t->timestamps();
+        });
     }
 
     private function seedFixture(): void
@@ -205,7 +217,7 @@ class TeacherGradeDataScopeTest extends TestCase
 
     private function rosterUrl(array $params): string
     {
-        return '/api/teacher/grades?' . http_build_query($params + ['academic_year' => '2025/2026']);
+        return '/api/teacher/grades?'.http_build_query($params + ['academic_year' => '2025/2026']);
     }
 
     public function test_guru_a_gets_math_grades_in_own_class(): void
@@ -301,6 +313,39 @@ class TeacherGradeDataScopeTest extends TestCase
         $this->assertSame(1, Grade::where('student_id', $this->studentA1Id)->where('type', 'tugas')->where('semester', '1')->count());
         $this->assertSame(1, Grade::where('student_id', $this->studentA2Id)->where('type', 'tugas')->where('semester', '1')->count());
         $this->assertEquals(80, (float) Grade::where('student_id', $this->studentA1Id)->where('type', 'tugas')->where('semester', '1')->value('score'));
+    }
+
+    public function test_bulk_rejected_when_published_report_card_without_grade(): void
+    {
+        $this->actingAs($this->guruA, 'sanctum');
+
+        $yearId = AcademicYear::where('name', '2025/2026')->value('id');
+        $semesterId = Semester::where('academic_year_id', $yearId)->where('name', '1')->value('id');
+
+        ReportCard::create([
+            'student_id' => $this->studentA1Id,
+            'class_id' => $this->classAId,
+            'academic_year_id' => $yearId,
+            'semester_id' => $semesterId,
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/teacher/grades/bulk', [
+            'class_id' => $this->classAId,
+            'subject_id' => $this->mathId,
+            'type' => 'tugas',
+            'semester' => '1',
+            'academic_year' => '2025/2026',
+            'items' => [
+                ['student_id' => $this->studentA1Id, 'score' => 80],
+                ['student_id' => $this->studentA2Id, 'score' => 70],
+            ],
+        ]);
+
+        $response->assertStatus(422)->assertJson(['success' => false, 'data' => null]);
+        $this->assertDatabaseMissing('grades', ['student_id' => $this->studentA1Id, 'type' => 'tugas']);
+        $this->assertDatabaseMissing('grades', ['student_id' => $this->studentA2Id, 'type' => 'tugas']);
     }
 
     public function test_user_without_teacher_profile_is_forbidden(): void

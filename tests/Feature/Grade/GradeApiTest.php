@@ -5,6 +5,7 @@ namespace Tests\Feature\Grade;
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
+use App\Models\Academic\ReportCard;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
@@ -21,8 +22,11 @@ class GradeApiTest extends TestCase
     use BuildsGradeTestSchema;
 
     private int $classId;
+
     private int $subjectId;
+
     private int $studentId;
+
     private int $classSubjectId;
 
     protected function setUp(): void
@@ -105,9 +109,9 @@ class GradeApiTest extends TestCase
     private function createTestUser(int $roleId, string $prefix = 'test'): User
     {
         return User::create([
-            'username' => $prefix . '_' . mt_rand(100000, 999999),
-            'name' => 'Test User Grade ' . $prefix,
-            'email' => $prefix . '.' . mt_rand(100000, 999999) . '@test.local',
+            'username' => $prefix.'_'.mt_rand(100000, 999999),
+            'name' => 'Test User Grade '.$prefix,
+            'email' => $prefix.'.'.mt_rand(100000, 999999).'@test.local',
             'password' => 'password',
             'is_active' => true,
             'role_id' => $roleId,
@@ -117,8 +121,8 @@ class GradeApiTest extends TestCase
     private function createTestStudent(array $overrides = []): Student
     {
         $defaults = [
-            'nisn' => 'GN-' . str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
-            'nis' => 'SN-' . str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
+            'nisn' => 'GN-'.str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
+            'nis' => 'SN-'.str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
             'name' => 'Test Student Grade',
             'gender' => 'L',
             'birth_place' => 'Test City',
@@ -555,6 +559,73 @@ class GradeApiTest extends TestCase
     }
 
     // ─── Store Validation Tests ────────────────────────────────
+
+    public function test_store_rejected_when_published_report_card_without_grade(): void
+    {
+        $this->authenticateAsAdmin();
+
+        $yearId = AcademicYear::where('name', '2026/2027')->value('id');
+        $semesterId = Semester::where('academic_year_id', $yearId)->where('name', '1')->value('id');
+
+        ReportCard::create([
+            'student_id' => $this->studentId,
+            'class_id' => $this->classId,
+            'academic_year_id' => $yearId,
+            'semester_id' => $semesterId,
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+
+        $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'semester' => '1',
+            'academic_year' => '2026/2027',
+        ])
+            ->assertStatus(422)
+            ->assertJson(['success' => false, 'data' => null]);
+
+        $this->assertDatabaseMissing('grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'semester' => '1',
+            'academic_year' => '2026/2027',
+        ]);
+    }
+
+    public function test_store_allowed_when_published_report_card_is_other_class(): void
+    {
+        $this->authenticateAsAdmin();
+
+        $yearId = AcademicYear::where('name', '2026/2027')->value('id');
+        $semesterId = Semester::where('academic_year_id', $yearId)->where('name', '1')->value('id');
+
+        $otherClass = SchoolClass::create(['name' => 'Other Class', 'academic_year' => '2026/2027']);
+
+        ReportCard::create([
+            'student_id' => $this->studentId,
+            'class_id' => $otherClass->id,
+            'academic_year_id' => $yearId,
+            'semester_id' => $semesterId,
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+
+        $this->postJson('/api/grades', [
+            'student_id' => $this->studentId,
+            'subject_id' => $this->subjectId,
+            'class_id' => $this->classId,
+            'type' => 'tugas',
+            'score' => 85,
+            'semester' => '1',
+            'academic_year' => '2026/2027',
+        ])->assertStatus(201);
+    }
 
     public function test_store_requires_student_id(): void
     {
@@ -1443,7 +1514,7 @@ class GradeApiTest extends TestCase
         $this->createTestGrade(['type' => 'tugas', 'semester' => '1', 'academic_year' => '2025/2026']);
         $period = $this->resolvePeriod('2025/2026', '1');
 
-        $response = $this->getJson('/api/grades?' . http_build_query([
+        $response = $this->getJson('/api/grades?'.http_build_query([
             'semester_id' => $period['semester_id'],
             'academic_year_id' => $period['academic_year_id'],
         ]));
@@ -1461,7 +1532,7 @@ class GradeApiTest extends TestCase
         $this->authenticate();
         $period = $this->resolvePeriod('2025/2026', '1');
 
-        $this->getJson('/api/grades?' . http_build_query([
+        $this->getJson('/api/grades?'.http_build_query([
             'semester_id' => $period['semester_id'],
             'semester' => '2',
         ]))->assertStatus(422);

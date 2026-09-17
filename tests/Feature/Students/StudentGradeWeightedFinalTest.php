@@ -12,6 +12,7 @@ use App\Models\Students\Student;
 use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\BuildsGradeTestSchema;
@@ -486,5 +487,40 @@ class StudentGradeWeightedFinalTest extends TestCase
         $this->assertSame(2, $unfiltered['total_subjects'], 'semester identities never merge');
         $this->assertEquals(92.5, $unfiltered['average'], '(85 + 100) / 2');
         $this->assertEquals(100.0, $unfiltered['highest']);
+    }
+
+    public function test_index_uses_single_bulk_assessment_query(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+        $this->gradeFor($this->student1, 'uas', 90.0);
+
+        Grade::create([
+            'student_id' => $this->student1->id,
+            'subject_id' => $this->subject2->id,
+            'class_id' => $this->class1->id,
+            'type' => 'tugas',
+            'score' => 70.0,
+            'semester' => $this->semester1->name,
+            'academic_year' => $this->ay->name,
+            'semester_id' => $this->semester1->id,
+            'academic_year_id' => $this->ay->id,
+        ]);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0);
+        $this->assessmentFor($this->student1, 'uas', 90.0);
+        $this->assessmentFor($this->student1, 'tugas', 70.0, null, $this->semester1, ['subject_id' => $this->subject2->id]);
+
+        DB::enableQueryLog();
+
+        $response = $this->getJson('/api/student/grades')->assertOk();
+
+        $assessmentQueries = collect(DB::getQueryLog())
+            ->filter(fn (array $entry) => str_contains($entry['query'], 'grade_assessments'))
+            ->count();
+
+        $this->assertSame(2, count($response->json('data')), 'two subject identities returned');
+        $this->assertSame(1, $assessmentQueries, 'assessment evidence loaded in one bulk query, not per subject');
     }
 }
