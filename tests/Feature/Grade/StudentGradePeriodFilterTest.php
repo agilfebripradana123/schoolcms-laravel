@@ -10,7 +10,8 @@ use App\Models\Academic\Subject;
 use App\Models\Students\Student;
 use App\Models\System\Role;
 use App\Models\System\User;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\BuildsGradeTestSchema;
 use Tests\TestCase;
@@ -28,7 +29,9 @@ class StudentGradePeriodFilterTest extends TestCase
     use BuildsGradeTestSchema;
 
     private int $classId;
+
     private int $subjectId;
+
     private int $studentId;
 
     protected function setUp(): void
@@ -36,6 +39,30 @@ class StudentGradePeriodFilterTest extends TestCase
         parent::setUp();
 
         $this->buildGradeSchema();
+
+        // StudentGradeController::index() now derives final_score from
+        // grade_assessments, so the hermetic schema must include them.
+        Schema::create('grade_assessments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->string('assessment_category', 50);
+            $t->unsignedInteger('assessment_sequence');
+            $t->decimal('score', 5, 2);
+            $t->decimal('max_score', 5, 2)->default(100);
+            $t->decimal('weight', 5, 2)->nullable();
+            $t->string('source_type', 50)->nullable();
+            $t->unsignedInteger('source_id')->nullable();
+            $t->timestamps();
+            $t->unique(
+                ['student_id', 'subject_id', 'class_id', 'academic_year_id', 'semester_id', 'assessment_category', 'assessment_sequence'],
+                'uq_grade_assessments_cat_seq'
+            );
+        });
+
         $this->seedGradeBaseline();
 
         $this->cleanup();
@@ -56,9 +83,9 @@ class StudentGradePeriodFilterTest extends TestCase
         $siswaRole = Role::where('name', 'Siswa')->firstOrFail();
 
         $user = User::create([
-            'username' => 'spp_' . mt_rand(100000, 999999),
+            'username' => 'spp_'.mt_rand(100000, 999999),
             'name' => 'Student Portal Test',
-            'email' => 'spp.' . mt_rand(100000, 999999) . '@test.local',
+            'email' => 'spp.'.mt_rand(100000, 999999).'@test.local',
             'password' => 'password',
             'is_active' => true,
             'role_id' => $siswaRole->id,
@@ -67,8 +94,8 @@ class StudentGradePeriodFilterTest extends TestCase
         $student = Student::create([
             'user_id' => $user->id,
             'class_id' => $this->classId,
-            'nisn' => 'GN-' . str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
-            'nis' => 'SN-' . str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
+            'nisn' => 'GN-'.str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
+            'nis' => 'SN-'.str_pad(mt_rand(100000, 999999), 6, '0', STR_PAD_LEFT),
             'name' => 'Student Portal Test',
             'gender' => 'P',
         ]);
@@ -123,7 +150,7 @@ class StudentGradePeriodFilterTest extends TestCase
     {
         $period = $this->resolvePeriod('2025/2026', '1');
 
-        $response = $this->getJson('/api/student/grades?semester_id=' . $period['semester_id']);
+        $response = $this->getJson('/api/student/grades?semester_id='.$period['semester_id']);
 
         $response->assertOk();
         $data = $response->json('data');
@@ -138,7 +165,7 @@ class StudentGradePeriodFilterTest extends TestCase
     {
         $period = $this->resolvePeriod('2025/2026', '2');
 
-        $response = $this->getJson('/api/student/grades?' . http_build_query([
+        $response = $this->getJson('/api/student/grades?'.http_build_query([
             'academic_year_id' => $period['academic_year_id'],
             'semester_id' => $period['semester_id'],
         ]));
@@ -164,7 +191,7 @@ class StudentGradePeriodFilterTest extends TestCase
     {
         $period = $this->resolvePeriod('2025/2026', '2');
 
-        $response = $this->getJson('/api/student/grades/summary?semester_id=' . $period['semester_id']);
+        $response = $this->getJson('/api/student/grades/summary?semester_id='.$period['semester_id']);
 
         $response->assertOk();
         $data = $response->json('data');
@@ -178,7 +205,7 @@ class StudentGradePeriodFilterTest extends TestCase
     {
         $period = $this->resolvePeriod('2025/2026', '1');
 
-        $response = $this->getJson('/api/student/grades?' . http_build_query([
+        $response = $this->getJson('/api/student/grades?'.http_build_query([
             'semester_id' => $period['semester_id'],
             'semester' => '2',
         ]));

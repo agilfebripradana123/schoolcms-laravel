@@ -6,9 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Academic\AcademicYear;
 use App\Models\Academic\Grade;
 use App\Models\Academic\Semester;
+use App\Services\Academic\GradeAggregationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -18,6 +18,13 @@ use Illuminate\Validation\ValidationException;
  */
 class StudentGradeController extends Controller
 {
+    private GradeAggregationService $aggregation;
+
+    public function __construct(GradeAggregationService $aggregation)
+    {
+        $this->aggregation = $aggregation;
+    }
+
     public function index(Request $request): JsonResponse
     {
         $student = $request->attributes->get('student_profile');
@@ -40,7 +47,7 @@ class StudentGradeController extends Controller
 
         // Group by subject: pivot tugas/uts/uas per subject+semester+year
         $rows = collect();
-        $grouped = $grades->groupBy(fn ($g) => $g->subject_id . '|' . $g->semester . '|' . $g->academic_year);
+        $grouped = $grades->groupBy(fn ($g) => $g->subject_id.'|'.$g->semester.'|'.$g->academic_year);
 
         foreach ($grouped as $group) {
             $first = $group->first();
@@ -61,9 +68,18 @@ class StudentGradeController extends Controller
                 $row[$g->type] = (float) $g->score;
             }
 
-            // Final score: average of all present scores
-            $scores = array_filter([$row['tugas'], $row['uts'], $row['uas']], fn ($v) => $v !== null);
-            $row['final_score'] = count($scores) > 0 ? round(array_sum($scores) / count($scores), 2) : null;
+            // Final score: assessment-derived canonical weighted final (Phase 2L-5).
+            // Read-only derivation from grade_assessments; never falls back to
+            // grades.score, which remains the persisted bucket-value source above.
+            $derived = $this->aggregation->weightedFinalScore(
+                $student->id,
+                $first->subject_id,
+                $first->class_id,
+                $first->academic_year_id,
+                $first->semester_id
+            );
+
+            $row['final_score'] = $derived['weighted_final_score'];
 
             $rows->push($row);
         }
@@ -127,7 +143,7 @@ class StudentGradeController extends Controller
      */
     private function periodFilters(array $validated): array
     {
-        if (!empty($validated['academic_year_id']) && !empty($validated['academic_year'])) {
+        if (! empty($validated['academic_year_id']) && ! empty($validated['academic_year'])) {
             $name = AcademicYear::where('id', $validated['academic_year_id'])->value('name');
 
             if ($name !== null && $name !== $validated['academic_year']) {
@@ -137,7 +153,7 @@ class StudentGradeController extends Controller
             }
         }
 
-        if (!empty($validated['semester_id']) && !empty($validated['semester'])) {
+        if (! empty($validated['semester_id']) && ! empty($validated['semester'])) {
             $name = Semester::where('id', $validated['semester_id'])->value('name');
 
             if ($name !== null && $name !== $validated['semester']) {
@@ -147,17 +163,17 @@ class StudentGradeController extends Controller
             }
         }
 
-        if (!empty($validated['academic_year_id'])) {
+        if (! empty($validated['academic_year_id'])) {
             $academicYear = ['academic_year_id', $validated['academic_year_id']];
-        } elseif (!empty($validated['academic_year'])) {
+        } elseif (! empty($validated['academic_year'])) {
             $academicYear = ['academic_year', $validated['academic_year']];
         } else {
             $academicYear = null;
         }
 
-        if (!empty($validated['semester_id'])) {
+        if (! empty($validated['semester_id'])) {
             $semester = ['semester_id', $validated['semester_id']];
-        } elseif (!empty($validated['semester'])) {
+        } elseif (! empty($validated['semester'])) {
             $semester = ['semester', $validated['semester']];
         } else {
             $semester = null;
