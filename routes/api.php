@@ -1227,12 +1227,18 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/exams/results', [ExamResultController::class, 'index']);
         });
 
-        // Portal Guru: Development
-        Route::middleware('permission:manage-development')->group(function () {
+        // Portal Guru: Development (read-only, guru scope: my students)
+        Route::middleware('permission:view-achievements')->group(function () {
             Route::get('/development/achievements', [AchievementController::class, 'myAchievements']);
+        });
+        Route::middleware('permission:view-violations')->group(function () {
             Route::get('/development/violations', [ViolationController::class, 'myViolations']);
-            Route::get('/development/counselings', [CounselingController::class, 'myCounselings']);
+        });
+        Route::middleware('permission:view-extracurricular')->group(function () {
             Route::get('/development/extracurriculars', [ExtracurricularController::class, 'myExtracurriculars']);
+        });
+        Route::middleware('permission:view-counselings')->group(function () {
+            Route::get('/development/counselings', [CounselingController::class, 'myCounselings']);
         });
 
         // Portal Guru: Announcements

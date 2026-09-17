@@ -18,6 +18,9 @@ class ExtracurricularResource extends JsonResource
             'schedule_day' => $this->schedule_day,
             'is_active' => (bool) $this->is_active,
             'supervisor' => new TeacherResource($this->whenLoaded('supervisor')),
+            // Frontend compatibility aliases
+            'advisor' => $this->supervisor?->full_name ?? $this->supervisor?->name,
+            'schedule' => $this->schedule_day,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];

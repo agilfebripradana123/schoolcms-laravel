@@ -61,6 +61,7 @@ class PermissionSeeder extends Seeder
              ['name' => 'view-achievements', 'description' => 'Melihat prestasi siswa.'],
              ['name' => 'view-violations', 'description' => 'Melihat pelanggaran siswa.'],
              ['name' => 'view-extracurricular', 'description' => 'Melihat ekstrakurikuler siswa.'],
+             ['name' => 'view-counselings', 'description' => 'Melihat bimbingan konseling siswa.'],
 
 
             // Finance

@@ -21,6 +21,11 @@ class ViolationResource extends JsonResource
             'handled_by' => $this->handled_by,
             'student' => new StudentResource($this->whenLoaded('student')),
             'handled_by_teacher' => new TeacherResource($this->whenLoaded('handledBy')),
+            // Frontend compatibility aliases
+            'student_name' => $this->student?->name,
+            'date' => $this->violated_at?->toDateString(),
+            'violation' => $this->category ?? $this->description,
+            'level' => $this->category,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];

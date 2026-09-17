@@ -38,6 +38,10 @@ class User extends Authenticatable
         'view-exam-schedules',
         'view-exam-results',
         'view-exam-monitoring',
+        'view-achievements',
+        'view-violations',
+        'view-extracurricular',
+        'view-counselings',
     ];
 
     protected $table = 'users';

@@ -19,6 +19,10 @@ class AchievementResource extends JsonResource
             'achievement_date' => $this->achievement_date?->toDateString(),
             'description' => $this->description,
             'student' => new StudentResource($this->whenLoaded('student')),
+            // Frontend compatibility aliases for portal guru
+            'student_name' => $this->student?->name,
+            'achievement' => $this->title,
+            'date' => $this->achievement_date?->toDateString(),
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];
