@@ -2,11 +2,11 @@
 
 namespace App\Models\Students;
 
+use App\Models\Academic\AcademicYear;
+use App\Models\Academic\SchoolClass;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-use App\Models\Academic\SchoolClass;
-use App\Models\Academic\AcademicYear;
 class StudentHistory extends Model
 {
     protected $table = 'student_histories';
@@ -17,6 +17,9 @@ class StudentHistory extends Model
         'academic_year_id',
         'status',
         'notes',
+        'is_final',
+        'finalized_at',
+        'finalized_by',
     ];
 
     protected function casts(): array
@@ -25,6 +28,9 @@ class StudentHistory extends Model
             'student_id' => 'integer',
             'class_id' => 'integer',
             'academic_year_id' => 'integer',
+            'is_final' => 'boolean',
+            'finalized_at' => 'datetime',
+            'finalized_by' => 'integer',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

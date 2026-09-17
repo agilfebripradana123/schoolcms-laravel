@@ -7,11 +7,13 @@ use App\Http\Requests\Api\Students\StoreStudentHistoryRequest;
 use App\Http\Requests\Api\Students\UpdateStudentHistoryRequest;
 use App\Http\Resources\Students\StudentHistoryResource;
 use App\Models\Students\StudentHistory;
+use App\Services\Students\StudentHistoryFinalizationService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class StudentHistoryController extends Controller
 {
-    public function index(\Illuminate\Http\Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $query = StudentHistory::query()->with(['student', 'schoolClass', 'academicYear']);
 
@@ -50,7 +52,7 @@ class StudentHistoryController extends Controller
     {
         $history = StudentHistory::with(['student', 'schoolClass', 'academicYear'])->find($id);
 
-        if (!$history) {
+        if (! $history) {
             return response()->json([
                 'success' => false,
                 'message' => 'Student history not found',
@@ -80,12 +82,16 @@ class StudentHistoryController extends Controller
     {
         $history = StudentHistory::find($id);
 
-        if (!$history) {
+        if (! $history) {
             return response()->json([
                 'success' => false,
                 'message' => 'Student history not found',
                 'data' => null,
             ], 404);
+        }
+
+        if ($history->is_final) {
+            return $this->finalized('A finalized student history cannot be modified.');
         }
 
         $history->update($request->validated());
@@ -101,12 +107,16 @@ class StudentHistoryController extends Controller
     {
         $history = StudentHistory::find($id);
 
-        if (!$history) {
+        if (! $history) {
             return response()->json([
                 'success' => false,
                 'message' => 'Student history not found',
                 'data' => null,
             ], 404);
+        }
+
+        if ($history->is_final) {
+            return $this->finalized('A finalized student history cannot be deleted.');
         }
 
         $history->delete();
@@ -116,5 +126,37 @@ class StudentHistoryController extends Controller
             'message' => 'Student history deleted successfully',
             'data' => null,
         ]);
+    }
+
+    public function finalize(Request $request, int $id): JsonResponse
+    {
+        $history = StudentHistory::find($id);
+
+        if (! $history) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Student history not found',
+                'data' => null,
+            ], 404);
+        }
+
+        $history = app(StudentHistoryFinalizationService::class)->finalize($history, $request->user());
+        $history->load(['student', 'schoolClass', 'academicYear']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Student history finalized successfully',
+            'data' => new StudentHistoryResource($history),
+        ]);
+    }
+
+    private function finalized(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'errors' => ['student_history' => ['A finalized student history is locked.']],
+            'data' => null,
+        ], 422);
     }
 }

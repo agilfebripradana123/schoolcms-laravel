@@ -738,6 +738,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/student-histories/{student_history}', [StudentHistoryController::class, 'update']);
         Route::patch('/student-histories/{student_history}', [StudentHistoryController::class, 'update']);
         Route::delete('/student-histories/{student_history}', [StudentHistoryController::class, 'destroy']);
+        Route::post('/student-histories/{student_history}/finalize', [StudentHistoryController::class, 'finalize']);
     });
 
 
