@@ -489,6 +489,64 @@ class StudentGradeWeightedFinalTest extends TestCase
         $this->assertEquals(100.0, $unfiltered['highest']);
     }
 
+    public function test_index_same_identity_stays_single_row(): void
+    {
+        $this->gradeFor($this->student1, 'tugas', 80.0);
+        $this->gradeFor($this->student1, 'uts', 60.0);
+        $this->gradeFor($this->student1, 'uas', 90.0);
+
+        $this->assessmentFor($this->student1, 'tugas', 80.0);
+        $this->assessmentFor($this->student1, 'uts', 60.0);
+        $this->assessmentFor($this->student1, 'uas', 90.0);
+
+        $data = $this->getJson('/api/student/grades')->assertOk()->json('data');
+
+        $this->assertCount(1, $data, 'one subject/class/period identity stays one display row');
+        $this->assertEquals($this->class1->name, $data[0]['class_name']);
+        $this->assertEquals(76.67, $data[0]['final_score']);
+        $this->assertEquals(80.0, $data[0]['tugas']);
+        $this->assertEquals(60.0, $data[0]['uts']);
+        $this->assertEquals(90.0, $data[0]['uas']);
+    }
+
+    public function test_index_split_class_identities_render_separate_rows(): void
+    {
+        $this->gradeFor($this->student1, 'uts', 100.0);
+
+        Grade::create([
+            'student_id' => $this->student1->id,
+            'subject_id' => $this->subject1->id,
+            'class_id' => $this->class2->id,
+            'type' => 'uts',
+            'score' => 0.00,
+            'semester' => $this->semester1->name,
+            'academic_year' => $this->ay->name,
+            'semester_id' => $this->semester1->id,
+            'academic_year_id' => $this->ay->id,
+        ]);
+
+        $this->assessmentFor($this->student1, 'uts', 100.0);
+        $this->assessmentFor($this->student1, 'uts', 0.0, null, $this->semester1, ['class_id' => $this->class2->id]);
+
+        $data = $this->getJson('/api/student/grades')->assertOk()->json('data');
+
+        $this->assertCount(2, $data, 'each class identity renders its own display row');
+
+        $byClass = collect($data)->keyBy('class_name');
+
+        $rowA = $byClass->get($this->class1->name);
+        $rowB = $byClass->get($this->class2->name);
+
+        $this->assertNotNull($rowA, 'class1 identity row present');
+        $this->assertNotNull($rowB, 'class2 identity row present');
+
+        $this->assertEquals(100.0, $rowA['uts'], 'bucket attached to its own class identity');
+        $this->assertEquals(100.0, $rowA['final_score'], 'final_score belongs to class1 identity');
+
+        $this->assertEquals(0.0, $rowB['uts']);
+        $this->assertEquals(0.0, $rowB['final_score'], 'final_score belongs to class2 identity');
+    }
+
     public function test_index_uses_single_bulk_assessment_query(): void
     {
         $this->gradeFor($this->student1, 'tugas', 80.0);

@@ -55,9 +55,10 @@ class StudentGradeController extends Controller
             $semesterId,
         );
 
-        // Group by subject: pivot tugas/uts/uas per subject+semester+year
+        // Group by canonical identity: subject+class+academic year+semester, so each
+        // display row (and its final_score) maps to exactly one 5-axis identity.
         $rows = collect();
-        $grouped = $grades->groupBy(fn ($g) => $g->subject_id.'|'.$g->semester.'|'.$g->academic_year);
+        $grouped = $grades->groupBy(fn ($g) => $g->subject_id.'|'.$g->class_id.'|'.$g->academic_year_id.'|'.$g->semester_id);
 
         foreach ($grouped as $group) {
             $first = $group->first();
