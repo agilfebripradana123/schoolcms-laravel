@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             RoleSeeder::class,
             AppearanceSeeder::class,
+            AcademicOutcomePolicySeeder::class,
         ]);
 
         User::firstOrCreate(
