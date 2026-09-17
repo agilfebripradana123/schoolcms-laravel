@@ -6,15 +6,18 @@ use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassSubject;
 use App\Models\Academic\Grade;
 use App\Models\Academic\GradeAssessment;
+use App\Models\Academic\ReportCard;
 use App\Models\Academic\SchoolClass;
 use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
 use App\Models\Students\Student;
 use App\Models\System\Role;
 use App\Models\System\User;
+use App\Services\Academic\GradeAggregationService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -144,6 +147,17 @@ class GradeAssessmentApiTest extends TestCase
             $t->boolean('is_final')->default(false);
             $t->dateTime('finalized_at')->nullable();
             $t->unsignedBigInteger('finalized_by')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('report_cards', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->text('teacher_notes')->nullable();
+            $t->string('status')->default('draft');
+            $t->dateTime('published_at')->nullable();
             $t->timestamps();
         });
     }
@@ -658,5 +672,228 @@ class GradeAssessmentApiTest extends TestCase
 
         $matched = $grade->assessmentsQuery()->count();
         $this->assertSame(2, $matched, 'Grade assessmentsQuery must return only matching identity');
+    }
+
+    // ─── K. IMMUTABILITY (Phase 2L-7C) ────────────────────────────
+
+    private function gradeForSlot(string $type = 'tugas'): Grade
+    {
+        return Grade::create([
+            'student_id' => $this->student1->id,
+            'subject_id' => $this->sub1->id,
+            'class_id' => $this->class1->id,
+            'type' => $type,
+            'score' => 85.00,
+            'semester' => '1',
+            'academic_year' => '2025/2026',
+            'semester_id' => $this->sem1->id,
+            'academic_year_id' => $this->ay1->id,
+            'is_final' => false,
+        ]);
+    }
+
+    private function finalizeSlot(Grade $grade): void
+    {
+        $grade->is_final = true;
+        $grade->finalized_at = now();
+        $grade->finalized_by = $this->admin->id;
+        $grade->save();
+    }
+
+    private function publishCard(): void
+    {
+        ReportCard::create([
+            'student_id' => $this->student1->id,
+            'class_id' => $this->class1->id,
+            'academic_year_id' => $this->ay1->id,
+            'semester_id' => $this->sem1->id,
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+    }
+
+    private function assertLocked422(TestResponse $response): void
+    {
+        $response->assertStatus(422)
+            ->assertJson(['success' => false, 'data' => null])
+            ->assertJsonStructure(['success', 'message', 'errors', 'data']);
+    }
+
+    public function test_bucket_for_category_mapping(): void
+    {
+        $service = app(GradeAggregationService::class);
+
+        foreach (['tugas', 'formatif', 'PH', 'PTS', 'PAS', 'sumatif', 'ujian_sekolah', 'remedial', 'other'] as $category) {
+            $this->assertSame('tugas', $service->bucketForCategory($category));
+        }
+
+        $this->assertSame('uts', $service->bucketForCategory('uts'));
+        $this->assertSame('uas', $service->bucketForCategory('uas'));
+        $this->assertNull($service->bucketForCategory('unknown'));
+    }
+
+    public function test_store_unknown_category_cannot_bypass_immutability(): void
+    {
+        $this->authenticateAdmin();
+
+        $this->postJson('/api/grade-assessments', $this->validPayload(['assessment_category' => 'unknown']))
+            ->assertStatus(422);
+        $this->assertDatabaseCount('grade_assessments', 0);
+    }
+
+    public function test_store_unlocked_slot_succeeds_without_grade(): void
+    {
+        $this->authenticateAdmin();
+
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $this->assertDatabaseCount('grade_assessments', 1);
+    }
+
+    public function test_store_finalized_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->finalizeSlot($this->gradeForSlot('tugas'));
+
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(422);
+        $this->assertDatabaseCount('grade_assessments', 0);
+    }
+
+    public function test_store_published_report_card_with_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->gradeForSlot('tugas');
+        $this->publishCard();
+
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(422);
+        $this->assertDatabaseCount('grade_assessments', 0);
+    }
+
+    public function test_store_published_report_card_without_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->publishCard();
+
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(422);
+        $this->assertDatabaseCount('grade_assessments', 0);
+    }
+
+    public function test_store_locked_envelope_shape(): void
+    {
+        $this->authenticateAdmin();
+        $this->finalizeSlot($this->gradeForSlot('tugas'));
+
+        $this->assertLocked422($this->postJson('/api/grade-assessments', $this->validPayload()));
+        $this->assertDatabaseCount('grade_assessments', 0);
+    }
+
+    public function test_update_unlocked_slot_succeeds(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+
+        $this->putJson("/api/grade-assessments/{$id}", ['score' => 90.00])->assertStatus(200);
+        $this->assertSame('90.00', (string) GradeAssessment::find($id)->score);
+    }
+
+    public function test_update_finalized_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $this->finalizeSlot($this->gradeForSlot('tugas'));
+
+        $this->assertLocked422($this->putJson("/api/grade-assessments/{$id}", ['score' => 90.00]));
+        $this->assertSame('85.00', (string) GradeAssessment::find($id)->score);
+    }
+
+    public function test_update_published_report_card_with_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $this->gradeForSlot('tugas');
+        $this->publishCard();
+
+        $this->assertLocked422($this->putJson("/api/grade-assessments/{$id}", ['score' => 90.00]));
+        $this->assertSame('85.00', (string) GradeAssessment::find($id)->score);
+    }
+
+    public function test_update_published_report_card_without_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $this->publishCard();
+
+        $this->assertLocked422($this->putJson("/api/grade-assessments/{$id}", ['score' => 90.00]));
+        $this->assertSame('85.00', (string) GradeAssessment::find($id)->score);
+    }
+
+    public function test_destroy_unlocked_slot_succeeds(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+
+        $this->deleteJson("/api/grade-assessments/{$id}")->assertStatus(200);
+        $this->assertDatabaseMissing('grade_assessments', ['id' => $id]);
+    }
+
+    public function test_destroy_finalized_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $this->finalizeSlot($this->gradeForSlot('tugas'));
+
+        $this->assertLocked422($this->deleteJson("/api/grade-assessments/{$id}"));
+        $this->assertDatabaseHas('grade_assessments', ['id' => $id]);
+    }
+
+    public function test_destroy_published_report_card_with_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $this->gradeForSlot('tugas');
+        $this->publishCard();
+
+        $this->assertLocked422($this->deleteJson("/api/grade-assessments/{$id}"));
+        $this->assertDatabaseHas('grade_assessments', ['id' => $id]);
+    }
+
+    public function test_destroy_published_report_card_without_grade_is_rejected(): void
+    {
+        $this->authenticateAdmin();
+        $this->postJson('/api/grade-assessments', $this->validPayload())->assertStatus(201);
+        $id = GradeAssessment::first()->id;
+        $this->publishCard();
+
+        $this->assertLocked422($this->deleteJson("/api/grade-assessments/{$id}"));
+        $this->assertDatabaseHas('grade_assessments', ['id' => $id]);
+    }
+
+    public function test_exam_sourced_assessment_obeys_generic_guard(): void
+    {
+        $this->authenticateAdmin();
+        GradeAssessment::create([
+            'student_id' => $this->student1->id,
+            'subject_id' => $this->sub1->id,
+            'class_id' => $this->class1->id,
+            'academic_year_id' => $this->ay1->id,
+            'semester_id' => $this->sem1->id,
+            'assessment_category' => 'tugas',
+            'assessment_sequence' => 1,
+            'score' => 70.00,
+            'max_score' => 100.00,
+            'source_type' => 'exam_result',
+            'source_id' => 999,
+        ]);
+        $id = GradeAssessment::where('source_type', 'exam_result')->value('id');
+        $this->finalizeSlot($this->gradeForSlot('tugas'));
+
+        $this->assertLocked422($this->putJson("/api/grade-assessments/{$id}", ['score' => 80.00]));
+        $this->assertSame('70.00', (string) GradeAssessment::find($id)->score);
     }
 }

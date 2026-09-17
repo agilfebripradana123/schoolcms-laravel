@@ -11,6 +11,8 @@ use App\Models\Academic\Grade;
 use App\Models\Academic\GradeAssessment;
 use App\Services\Academic\GradeAggregationService;
 use App\Services\Academic\GradeAssessmentService;
+use App\Services\Academic\GradeMutationGuard;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -80,6 +82,15 @@ class GradeAssessmentController extends Controller
     {
         $validated = $request->validated();
 
+        app(GradeMutationGuard::class)->assertMutable($this->resolveMutationGrade(
+            (int) $validated['student_id'],
+            (int) $validated['subject_id'],
+            (int) $validated['class_id'],
+            (int) $validated['academic_year_id'],
+            (int) $validated['semester_id'],
+            $validated['assessment_category'],
+        ));
+
         $assessment = $this->service->create($validated);
 
         $assessment->load(['student', 'subject', 'schoolClass', 'academicYear', 'semester']);
@@ -131,6 +142,15 @@ class GradeAssessmentController extends Controller
 
         $validated = $request->validated();
 
+        app(GradeMutationGuard::class)->assertMutable($this->resolveMutationGrade(
+            $assessment->student_id,
+            $assessment->subject_id,
+            $assessment->class_id,
+            $assessment->academic_year_id,
+            $assessment->semester_id,
+            $assessment->assessment_category,
+        ));
+
         $updated = $this->service->update($assessment, $validated);
 
         $updated->load(['student', 'subject', 'schoolClass', 'academicYear', 'semester']);
@@ -157,15 +177,16 @@ class GradeAssessmentController extends Controller
             ], 404);
         }
 
-        $canDelete = $this->service->delete($assessment);
+        app(GradeMutationGuard::class)->assertMutable($this->resolveMutationGrade(
+            $assessment->student_id,
+            $assessment->subject_id,
+            $assessment->class_id,
+            $assessment->academic_year_id,
+            $assessment->semester_id,
+            $assessment->assessment_category,
+        ));
 
-        if (! $canDelete) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Asesmen tidak dapat dihapus karena sudah finalisasi.',
-                'data' => null,
-            ], 422);
-        }
+        $assessment->delete();
 
         return response()->json([
             'success' => true,
@@ -225,5 +246,53 @@ class GradeAssessmentController extends Controller
                 'grades_skipped' => $skipped,
             ],
         ]);
+    }
+
+    /**
+     * Resolve the academic Grade guarding an assessment's canonical slot.
+     *
+     * Returns the existing bucket Grade row when present, otherwise a minimal
+     * detached Grade shell carrying the slot identity so a published ReportCard
+     * (a subject-widthless lock on student/class/year/semester) still rejects
+     * the mutation. Unsupported categories fail safe with a 422.
+     */
+    private function resolveMutationGrade(
+        int $studentId,
+        int $subjectId,
+        int $classId,
+        int $academicYearId,
+        int $semesterId,
+        string $assessmentCategory,
+    ): Grade {
+        $bucket = $this->aggregation->bucketForCategory($assessmentCategory);
+
+        if ($bucket === null) {
+            throw new HttpResponseException(response()->json([
+                'success' => false,
+                'message' => 'Assessment cannot be mutated for this category.',
+                'errors' => ['assessment_category' => ['Unsupported assessment category.']],
+                'data' => null,
+            ], 422));
+        }
+
+        $grade = Grade::where('student_id', $studentId)
+            ->where('subject_id', $subjectId)
+            ->where('class_id', $classId)
+            ->where('type', $bucket)
+            ->where('academic_year_id', $academicYearId)
+            ->where('semester_id', $semesterId)
+            ->first();
+
+        if ($grade !== null) {
+            return $grade;
+        }
+
+        $shell = new Grade;
+        $shell->student_id = $studentId;
+        $shell->class_id = $classId;
+        $shell->academic_year_id = $academicYearId;
+        $shell->semester_id = $semesterId;
+
+        return $shell;
     }
 }

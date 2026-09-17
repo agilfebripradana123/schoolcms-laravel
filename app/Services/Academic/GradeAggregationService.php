@@ -42,6 +42,23 @@ class GradeAggregationService
     ];
 
     /**
+     * Resolve the academic grade bucket (tugas/uts/uas) for one assessment
+     * category. Uses BUCKETS as the single source of mapping truth.
+     *
+     * @return string|null the bucket owning the category, or null when unknown
+     */
+    public function bucketForCategory(string $category): ?string
+    {
+        foreach (self::BUCKETS as $bucket => $categories) {
+            if (in_array($category, $categories, true)) {
+                return $bucket;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Derive the bucket scores for one identity.
      *
      * Only present buckets are returned; a missing category yields no key.
@@ -55,36 +72,9 @@ class GradeAggregationService
         int $academicYearId,
         int $semesterId,
     ): array {
-        $assessments = GradeAssessment::query()
-            ->where('student_id', $studentId)
-            ->where('subject_id', $subjectId)
-            ->where('class_id', $classId)
-            ->where('academic_year_id', $academicYearId)
-            ->where('semester_id', $semesterId)
-            ->get();
-
-        $result = [];
-
-        foreach (self::BUCKETS as $bucket => $categories) {
-            $bucketAssessments = $assessments->filter(
-                fn (GradeAssessment $assessment) => in_array($assessment->assessment_category, $categories, true)
-            );
-
-            if ($bucketAssessments->isEmpty()) {
-                continue;
-            }
-
-            $normalized = $bucketAssessments->map(
-                fn (GradeAssessment $assessment) => $this->normalize((float) $assessment->score, (float) $assessment->max_score)
-            );
-
-            $result[$bucket] = [
-                'score' => round($normalized->avg(), 2),
-                'assessment_count' => $normalized->count(),
-            ];
-        }
-
-        return $result;
+        return $this->aggregateFromAssessments(
+            $this->assessmentsForIdentity($studentId, $subjectId, $classId, $academicYearId, $semesterId)
+        );
     }
 
     /**
@@ -185,16 +175,110 @@ class GradeAggregationService
         int $academicYearId,
         int $semesterId,
     ): array {
-        $derived = $this->aggregate($studentId, $subjectId, $classId, $academicYearId, $semesterId);
+        $assessments = $this->assessmentsForIdentity($studentId, $subjectId, $classId, $academicYearId, $semesterId);
 
-        $assessmentRows = GradeAssessment::query()
+        return $this->weightedFromBuckets(
+            $this->aggregateFromAssessments($assessments),
+            $assessments,
+        );
+    }
+
+    /**
+     * Derive the canonical weighted finals for every academic identity of one
+     * student in a single assessment query (Phase 2L-7B).
+     *
+     * The student/period scope is loaded once; identities are grouped in memory
+     * by (subject_id, class_id, academic_year_id, semester_id) and each group is
+     * evaluated with the exact weightedFinalScore() semantics. No per-identity
+     * database queries are issued. NULL indicates no eligible weighted final
+     * (no assessments, only zero weights, or no positive-weight category).
+     *
+     * @return array<string, float|null> keyed by subject_id|class_id|academic_year_id|semester_id
+     */
+    public function weightedFinalScoresForStudent(
+        int $studentId,
+        ?int $academicYearId = null,
+        ?int $semesterId = null,
+    ): array {
+        $query = GradeAssessment::query()->where('student_id', $studentId);
+
+        if ($academicYearId !== null) {
+            $query->where('academic_year_id', $academicYearId);
+        }
+
+        if ($semesterId !== null) {
+            $query->where('semester_id', $semesterId);
+        }
+
+        $assessments = $query->get();
+
+        $results = [];
+
+        foreach ($assessments->groupBy(
+            fn (GradeAssessment $assessment) => $this->identityKey($assessment)
+        ) as $key => $group) {
+            $results[$key] = $this->weightedFromBuckets(
+                $this->aggregateFromAssessments($group),
+                $group,
+            )['weighted_final_score'];
+        }
+
+        return $results;
+    }
+
+    private function assessmentsForIdentity(
+        int $studentId,
+        int $subjectId,
+        int $classId,
+        int $academicYearId,
+        int $semesterId,
+    ): Collection {
+        return GradeAssessment::query()
             ->where('student_id', $studentId)
             ->where('subject_id', $subjectId)
             ->where('class_id', $classId)
             ->where('academic_year_id', $academicYearId)
             ->where('semester_id', $semesterId)
-            ->get(['assessment_category', 'weight']);
+            ->get();
+    }
 
+    private function aggregateFromAssessments(Collection $assessments): array
+    {
+        $result = [];
+
+        foreach (array_keys(self::BUCKETS) as $bucket) {
+            $derived = $this->deriveBucket($assessments, $bucket);
+
+            if ($derived !== null) {
+                $result[$bucket] = $derived;
+            }
+        }
+
+        return $result;
+    }
+
+    private function deriveBucket(Collection $assessments, string $bucket): ?array
+    {
+        $bucketAssessments = $assessments->filter(
+            fn (GradeAssessment $assessment) => in_array($assessment->assessment_category, self::BUCKETS[$bucket], true)
+        );
+
+        if ($bucketAssessments->isEmpty()) {
+            return null;
+        }
+
+        $normalized = $bucketAssessments->map(
+            fn (GradeAssessment $assessment) => $this->normalize((float) $assessment->score, (float) $assessment->max_score)
+        );
+
+        return [
+            'score' => round($normalized->avg(), 2),
+            'assessment_count' => $normalized->count(),
+        ];
+    }
+
+    private function weightedFromBuckets(array $derived, Collection $assessmentRows): array
+    {
         $categories = [];
         $weightedSum = 0.0;
         $weightSum = 0.0;
@@ -218,6 +302,16 @@ class GradeAggregationService
             'weighted_final_score' => $weightSum > 0 ? round($weightedSum / $weightSum, 2) : null,
             'categories' => $categories,
         ];
+    }
+
+    private function identityKey(GradeAssessment $assessment): string
+    {
+        return implode('|', [
+            $assessment->subject_id,
+            $assessment->class_id,
+            $assessment->academic_year_id,
+            $assessment->semester_id,
+        ]);
     }
 
     /**
