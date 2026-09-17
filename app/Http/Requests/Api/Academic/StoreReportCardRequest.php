@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\Academic;
 
+use App\Models\Academic\Semester;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -24,7 +25,7 @@ class StoreReportCardRequest extends FormRequest
             $academicYearId = $this->input('academic_year_id');
             $semesterId = $this->input('semester_id');
 
-            $semester = \App\Models\Academic\Semester::find($semesterId);
+            $semester = Semester::find($semesterId);
 
             if ($semester && (int) $semester->academic_year_id !== (int) $academicYearId) {
                 $validator->errors()->add('semester_id', 'The selected semester does not belong to the selected academic year.');

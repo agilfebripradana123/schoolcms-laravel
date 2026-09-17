@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Api\Academic;
 
+use App\Models\Academic\ReportCard;
+use App\Models\Academic\Semester;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -21,16 +23,16 @@ class UpdateReportCardRequest extends FormRequest
                 return;
             }
 
-            $reportCard = \App\Models\Academic\ReportCard::find($this->route('report_card'));
+            $reportCard = ReportCard::find($this->route('report_card'));
 
-            if (!$reportCard) {
+            if (! $reportCard) {
                 return;
             }
 
             $academicYearId = $this->input('academic_year_id', $reportCard->academic_year_id);
             $semesterId = $this->input('semester_id', $reportCard->semester_id);
 
-            $semester = \App\Models\Academic\Semester::find($semesterId);
+            $semester = Semester::find($semesterId);
 
             if ($semester && (int) $semester->academic_year_id !== (int) $academicYearId) {
                 $validator->errors()->add('semester_id', 'The selected semester does not belong to the selected academic year.');

@@ -8,10 +8,11 @@ use App\Http\Requests\Api\Academic\UpdateReportCardRequest;
 use App\Http\Resources\Academic\ReportCardResource;
 use App\Models\Academic\ReportCard;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class ReportCardController extends Controller
 {
-    public function index(\Illuminate\Http\Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $query = ReportCard::query()->with(['student', 'schoolClass', 'academicYear', 'semester']);
 
@@ -54,7 +55,7 @@ class ReportCardController extends Controller
     {
         $reportCard = ReportCard::with(['student', 'schoolClass', 'academicYear', 'semester'])->find($id);
 
-        if (!$reportCard) {
+        if (! $reportCard) {
             return response()->json([
                 'success' => false,
                 'message' => 'Report card not found',
@@ -71,7 +72,15 @@ class ReportCardController extends Controller
 
     public function store(StoreReportCardRequest $request): JsonResponse
     {
-        $reportCard = ReportCard::create($request->validated());
+        $validated = $request->validated();
+
+        if (($validated['status'] ?? 'draft') === 'published') {
+            $validated['published_at'] = now();
+        } else {
+            $validated['published_at'] = null;
+        }
+
+        $reportCard = ReportCard::create($validated);
         $reportCard->load(['student', 'schoolClass', 'academicYear', 'semester']);
 
         return response()->json([
@@ -85,7 +94,7 @@ class ReportCardController extends Controller
     {
         $reportCard = ReportCard::find($id);
 
-        if (!$reportCard) {
+        if (! $reportCard) {
             return response()->json([
                 'success' => false,
                 'message' => 'Report card not found',
@@ -93,7 +102,32 @@ class ReportCardController extends Controller
             ], 404);
         }
 
-        $reportCard->update($request->validated());
+        $validated = $request->validated();
+
+        if ($reportCard->status === 'published') {
+            foreach (['student_id', 'class_id', 'academic_year_id', 'semester_id', 'published_at'] as $field) {
+                if (array_key_exists($field, $validated)) {
+                    return $this->locked('A published report card has an immutable identity and timestamp.');
+                }
+            }
+
+            if (isset($validated['status']) && $validated['status'] !== 'published') {
+                return $this->locked('A published report card cannot transition back to draft.');
+            }
+
+            $reportCard->update(['teacher_notes' => $validated['teacher_notes'] ?? $reportCard->teacher_notes]);
+        } else {
+            unset($validated['published_at']);
+
+            if (($validated['status'] ?? 'draft') === 'published') {
+                $validated['published_at'] = now();
+            } else {
+                $validated['published_at'] = null;
+            }
+
+            $reportCard->update($validated);
+        }
+
         $reportCard->load(['student', 'schoolClass', 'academicYear', 'semester']);
 
         return response()->json([
@@ -107,12 +141,16 @@ class ReportCardController extends Controller
     {
         $reportCard = ReportCard::find($id);
 
-        if (!$reportCard) {
+        if (! $reportCard) {
             return response()->json([
                 'success' => false,
                 'message' => 'Report card not found',
                 'data' => null,
             ], 404);
+        }
+
+        if ($reportCard->status === 'published') {
+            return $this->locked('A published report card cannot be deleted.');
         }
 
         $reportCard->delete();
@@ -122,5 +160,15 @@ class ReportCardController extends Controller
             'message' => 'Report card deleted successfully',
             'data' => null,
         ]);
+    }
+
+    private function locked(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'errors' => ['report_card' => ['A published report card is locked.']],
+            'data' => null,
+        ], 422);
     }
 }
