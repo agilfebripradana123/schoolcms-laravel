@@ -176,6 +176,8 @@ class TeacherGradeController extends Controller
                 'name' => $student->name,
                 'gender' => $student->gender,
                 'score' => $grade?->score !== null ? (float) $grade->score : null,
+                'grade_id' => $grade?->id,
+                'is_final' => $grade?->is_final ?? false,
             ];
         });
 

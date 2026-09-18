@@ -16,16 +16,12 @@ class UserResource extends JsonResource
 
             // Inject default permissions into role.permissions so the frontend
             // "Hak akses dari Role" section is never empty when permission_role
-            // has no rows. Guru gets GURU_DEFAULT_PERMISSIONS, Administrator
-            // gets the full catalog.
+            // has no rows. Guru gets GURU_DEFAULT_PERMISSIONS.
             $roleName = strtolower($this->role->name);
             if ($roleName === 'guru') {
                 $defaultNames = \App\Models\System\User::GURU_DEFAULT_PERMISSIONS;
                 $defaultPerms = \App\Models\System\Permission::whereIn('name', $defaultNames)->get();
                 $roleArray['permissions'] = \App\Http\Resources\System\PermissionResource::collection($defaultPerms);
-            } elseif ($roleName === 'administrator') {
-                $allPerms = \App\Models\System\Permission::whereNotIn('name', ['view-audit-logs', 'manage-settings'])->orderBy('name')->get();
-                $roleArray['permissions'] = \App\Http\Resources\System\PermissionResource::collection($allPerms);
             }
 
             $roleData = $roleArray;
