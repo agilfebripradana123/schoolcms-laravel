@@ -51,6 +51,7 @@ use App\Http\Controllers\Api\Examination\ExamSessionController;
 use App\Http\Controllers\Api\Examination\ExamScheduleController;
 use App\Http\Controllers\Api\Examination\ExamInstructionController;
 use App\Http\Controllers\Api\Examination\ExamAttemptController;
+use App\Http\Controllers\Api\Examination\ExamReportController;
 use App\Http\Controllers\Api\Examination\ExamParticipantController;
 use App\Http\Controllers\Api\Examination\ExamResultController;
 use App\Http\Controllers\Api\Examination\ExamAnswerController;
@@ -461,6 +462,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/exam-results', [ExamResultController::class, 'index'])->middleware('permission:manage-exams');
     Route::get('/exam-results/{exam_result}', [ExamResultController::class, 'show'])->middleware('permission:manage-exams');
     Route::get('/exam-attempts', [ExamAttemptController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-reports/{exam}', [ExamReportController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/exam-reports/{exam}/questions', [ExamReportController::class, 'questions'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-results', [ExamResultController::class, 'store']);
@@ -1201,6 +1204,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/exam-grading/answers/{examAnswer}', [TeacherExamGradingController::class, 'grade'])
             ->middleware('permission:view-exam-results');
         Route::post('/exam-grading/results/{result}/grade-sync', [TeacherExamGradingController::class, 'syncGrade'])
+            ->middleware('permission:view-exam-results');
+        Route::get('/exam-reports/{exam}', [ExamReportController::class, 'index'])
+            ->middleware('permission:view-exam-results');
+        Route::get('/exam-reports/{exam}/questions', [ExamReportController::class, 'questions'])
             ->middleware('permission:view-exam-results');
 
         // Portal Guru: Teachers (manage-teachers permission)
