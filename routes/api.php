@@ -50,6 +50,7 @@ use App\Http\Controllers\Api\Examination\ExamQuestionController;
 use App\Http\Controllers\Api\Examination\ExamSessionController;
 use App\Http\Controllers\Api\Examination\ExamScheduleController;
 use App\Http\Controllers\Api\Examination\ExamInstructionController;
+use App\Http\Controllers\Api\Examination\ExamAttemptController;
 use App\Http\Controllers\Api\Examination\ExamParticipantController;
 use App\Http\Controllers\Api\Examination\ExamResultController;
 use App\Http\Controllers\Api\Examination\ExamAnswerController;
@@ -459,6 +460,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     Route::get('/exam-results', [ExamResultController::class, 'index'])->middleware('permission:manage-exams');
     Route::get('/exam-results/{exam_result}', [ExamResultController::class, 'show'])->middleware('permission:manage-exams');
+    Route::get('/exam-attempts', [ExamAttemptController::class, 'index'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/exam-results', [ExamResultController::class, 'store']);

@@ -81,6 +81,16 @@ class ExamResultController extends Controller
             ], 404);
         }
 
+        // Only attempts that can legitimately produce a result (submitted or
+        // expired) are eligible at the admin result-creation boundary.
+        if (! in_array($attempt->status, ['submitted', 'expired'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Attempt must be submitted or expired before a result can be created.',
+                'data' => null,
+            ], 422);
+        }
+
         // Results are generated exclusively by the scoring service; identity is
         // bound to the attempt. Client-provided score fields are never honored.
         app(ExamScoringService::class)->scoreAttempt($attempt);

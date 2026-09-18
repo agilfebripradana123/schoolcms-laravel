@@ -197,6 +197,7 @@ class ExaminationSecurityBoundaryTest extends TestCase
             $t->unsignedBigInteger('participant_id');
             $t->unsignedBigInteger('exam_attempt_id')->nullable();
             $t->decimal('total_score', 10, 2)->default(0);
+            $t->decimal('percentage', 5, 2)->nullable();
             $t->unsignedInteger('correct_count')->default(0);
             $t->unsignedInteger('wrong_count')->default(0);
             $t->unsignedInteger('unanswered_count')->default(0);
@@ -327,6 +328,14 @@ class ExaminationSecurityBoundaryTest extends TestCase
             'status' => 'graded',
         ]);
 
+        // Legacy historical result without an attempt link (read-only).
+        ExamResult::create([
+            'participant_id' => $participantA->id,
+            'total_score' => 10,
+            'grade' => 'B',
+            'status' => 'graded',
+        ]);
+
         // Attempt belonging to student B only.
         $this->attemptB = ExamAttempt::create([
             'exam_participant_id' => $participantB->id,
@@ -336,6 +345,31 @@ class ExaminationSecurityBoundaryTest extends TestCase
             'started_at' => now(),
             'expires_at' => now()->addMinutes(60),
         ]);
+
+        // Expired attempt (participant B) — eligible but without a result.
+        $this->attemptExpired = ExamAttempt::create([
+            'exam_participant_id' => $participantB->id,
+            'exam_id' => $exam->id,
+            'attempt_number' => 2,
+            'status' => 'expired',
+            'started_at' => now()->subMinutes(30),
+            'expires_at' => now()->subMinute(),
+        ]);
+
+        // Submitted attempt (participant B) — eligible, without a result.
+        $this->attemptNoResult = ExamAttempt::create([
+            'exam_participant_id' => $participantB->id,
+            'exam_id' => $exam->id,
+            'attempt_number' => 3,
+            'status' => 'submitted',
+            'started_at' => now()->subMinutes(20),
+            'submitted_at' => now()->subMinutes(5),
+            'expires_at' => now()->addMinutes(60),
+        ]);
+
+        $this->attemptA = $attemptA;
+        $this->resultAId = ExamResult::where('exam_attempt_id', $attemptA->id)->first()->id;
+        $this->legacyResultId = ExamResult::where('exam_attempt_id', null)->first()->id;
 
         $this->admin = $admin;
         $this->guru = $guru;
@@ -517,5 +551,145 @@ class ExaminationSecurityBoundaryTest extends TestCase
         $stored = ExamAnswer::find($id);
         $this->assertNotNull($stored);
         $this->assertNull($stored->is_correct, 'admin request must not persist client-supplied is_correct');
+    }
+
+    // -----------------------------------------------------------------
+    // B10 — admin result per-attempt contract
+    // -----------------------------------------------------------------
+
+    public function test_admin_store_result_binds_attempt_and_uses_authoritative_scoring(): void
+    {
+        Sanctum::actingAs($this->admin);
+
+        // Attempt has no result yet; store with forged manual score fields
+        // must produce the attempt-bound, scoring-generated result.
+        $res = $this->postJson('/api/exam-results', [
+            'exam_attempt_id' => $this->attemptNoResult->id,
+            'participant_id' => 999,
+            'total_score' => 999,
+            'correct_count' => 99,
+            'grade' => 'A+',
+            'status' => 'graded',
+        ]);
+        $res->assertStatus(201);
+        $this->assertSame($this->attemptNoResult->id, (int) $res->json('data.exam_attempt_id'));
+        $this->assertSame(0, (int) $res->json('data.total_score'), 'manual score inputs are never authoritative');
+
+        $stored = ExamResult::where('exam_attempt_id', $this->attemptNoResult->id)->first();
+        $this->assertNotNull($stored);
+        $this->assertSame(0, (int) $stored->total_score);
+        $this->assertSame($this->participantBId, $stored->participant_id, 'participant identity derived from the attempt');
+    }
+
+    public function test_admin_store_duplicate_attempt_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $this->postJson('/api/exam-results', ['exam_attempt_id' => $this->attemptNoResult->id])->assertStatus(201);
+
+        $res = $this->postJson('/api/exam-results', ['exam_attempt_id' => $this->attemptNoResult->id]);
+        $res->assertStatus(422);
+        $this->assertSame(1, ExamResult::where('exam_attempt_id', $this->attemptNoResult->id)->count(), 'existing result must remain intact');
+    }
+
+    public function test_admin_result_resource_exposes_attempt_identity(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $res = $this->getJson("/api/exam-results/{$this->resultAId}")->assertStatus(200);
+        $this->assertSame($this->attemptA->id, (int) $res->json('data.exam_attempt_id'));
+        $this->assertSame(1, (int) $res->json('data.attempt_number'));
+    }
+
+    public function test_admin_result_resource_marks_legacy_rows_without_attempt_number(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $res = $this->getJson("/api/exam-results/{$this->legacyResultId}")->assertStatus(200);
+        $this->assertNull($res->json('data.exam_attempt_id'));
+        $this->assertNull($res->json('data.attempt_number'));
+    }
+
+    // -----------------------------------------------------------------
+    // B11 — admin attempt selector + result-create eligibility
+    // -----------------------------------------------------------------
+
+    public function test_admin_can_list_eligible_attempts(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $res = $this->getJson('/api/exam-attempts')->assertStatus(200);
+        $rows = $res->json('data');
+
+        // submitted (with + without result) and expired attempts are included;
+        // the active attempt is excluded from the eligible selector.
+        $ids = array_column($rows, 'id');
+        $this->assertContains($this->attemptA->id, $ids, 'submitted attempt with result is selectable context');
+        $this->assertContains($this->attemptNoResult->id, $ids, 'submitted attempt without result included');
+        $this->assertContains($this->attemptExpired->id, $ids, 'expired attempt included');
+        $this->assertNotContains($this->attemptB->id, $ids, 'active attempt excluded by default');
+
+        // has_result derived server-side.
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[$row['id']] = $row;
+        }
+        $this->assertTrue($byId[$this->attemptA->id]['has_result']);
+        $this->assertFalse($byId[$this->attemptNoResult->id]['has_result']);
+        $this->assertFalse($byId[$this->attemptExpired->id]['has_result']);
+
+        // attempt_number + student/exam labels present, no internals exposed.
+        foreach ($rows as $row) {
+            $this->assertIsInt($row['attempt_number']);
+            $this->assertNotNull($row['exam']['title']);
+            $this->assertNotNull($row['exam']['subject']['name']);
+            $this->assertNotNull($row['participant']['student']['name']);
+        }
+        $encoded = json_encode($rows);
+        $this->assertStringNotContainsString('token', $encoded);
+        $this->assertStringNotContainsString('question_order', $encoded);
+        $this->assertStringNotContainsString('total_score', $encoded);
+        $this->assertStringNotContainsString('essay_answer', $encoded);
+    }
+
+    public function test_admin_attempt_list_requires_admin_authorization(): void
+    {
+        Sanctum::actingAs($this->guru);
+        $this->getJson('/api/exam-attempts')->assertStatus(403);
+    }
+
+    public function test_admin_attempt_list_filters(): void
+    {
+        Sanctum::actingAs($this->admin);
+
+        $statusFiltered = $this->getJson('/api/exam-attempts?status=submitted')->assertStatus(200)->json('data');
+        $ids = array_column($statusFiltered, 'id');
+        $this->assertContains($this->attemptNoResult->id, $ids);
+        $this->assertNotContains($this->attemptExpired->id, $ids, 'status filter cannot broaden beyond eligible set');
+
+        $searchedA = $this->getJson('/api/exam-attempts?search=Siswa%20A')->assertStatus(200)->json('data');
+        $searchIdsA = array_column($searchedA, 'id');
+        $this->assertContains($this->attemptA->id, $searchIdsA);
+        $this->assertNotContains($this->attemptNoResult->id, $searchIdsA, 'other students attempts must not match search');
+        $this->assertNotContains($this->attemptB->id, $searchIdsA);
+
+        $searchedB = $this->getJson('/api/exam-attempts?search=Siswa%20B')->assertStatus(200)->json('data');
+        $searchIdsB = array_column($searchedB, 'id');
+        $this->assertContains($this->attemptNoResult->id, $searchIdsB);
+        $this->assertContains($this->attemptExpired->id, $searchIdsB);
+        $this->assertNotContains($this->attemptB->id, $searchIdsB, 'active attempt excluded even when search matches');
+    }
+
+    public function test_admin_store_active_attempt_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $res = $this->postJson('/api/exam-results', ['exam_attempt_id' => $this->attemptB->id]);
+        $res->assertStatus(422);
+        $this->assertSame(0, ExamResult::where('exam_attempt_id', $this->attemptB->id)->count(), 'no result may be created for an active attempt');
+    }
+
+    public function test_admin_store_expired_attempt_creates_result(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $res = $this->postJson('/api/exam-results', ['exam_attempt_id' => $this->attemptExpired->id]);
+        $res->assertStatus(201);
+        $this->assertSame($this->attemptExpired->id, (int) $res->json('data.exam_attempt_id'));
+        $this->assertSame(1, ExamResult::where('exam_attempt_id', $this->attemptExpired->id)->count());
     }
 }
