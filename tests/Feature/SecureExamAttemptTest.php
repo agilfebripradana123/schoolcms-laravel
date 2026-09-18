@@ -11,6 +11,7 @@ use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptEvent;
 use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamParticipant;
+use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\ExamResult;
 use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
@@ -394,6 +395,43 @@ class SecureExamAttemptTest extends TestCase
         $this->q1o1Id = $q1o1->id;
         $this->q1o2Id = $q1o2->id;
         $this->q2o1Id = $q2o1->id;
+
+        // Hidden-result exam (show_result = false). Legacy composition fallback
+        // picks q1 by subject-bank order (total_questions = 1).
+        $hiddenExam = Exam::create([
+            'subject_id' => $math->id,
+            'title' => 'Ujian Tanpa Hasil',
+            'duration_minutes' => 60,
+            'total_questions' => 1,
+            'max_attempts' => 1,
+            'shuffle_questions' => false,
+            'shuffle_options' => false,
+            'show_result' => false,
+            'status' => 'published',
+        ]);
+        $hiddenParticipantA = ExamParticipant::create(['exam_id' => $hiddenExam->id, 'student_id' => $studentA->id, 'exam_card_number' => 'CARD-HA']);
+        $hiddenParticipantB = ExamParticipant::create(['exam_id' => $hiddenExam->id, 'student_id' => $studentB->id, 'exam_card_number' => 'CARD-HB']);
+
+        // Essay exam (show_result = true) to preserve pending/graded semantics.
+        $essayQuestion = QuestionBank::create(['subject_id' => $math->id, 'question_text' => 'Esai?', 'type' => 'essay', 'points' => 15, 'difficulty' => 'medium']);
+        $essayExam = Exam::create([
+            'subject_id' => $math->id,
+            'title' => 'Ujian Esai',
+            'duration_minutes' => 60,
+            'total_questions' => 1,
+            'max_attempts' => 1,
+            'show_result' => true,
+            'status' => 'published',
+        ]);
+        ExamQuestion::create(['exam_id' => $essayExam->id, 'question_id' => $essayQuestion->id, 'position' => 1, 'points' => 15]);
+        $essayParticipantA = ExamParticipant::create(['exam_id' => $essayExam->id, 'student_id' => $studentA->id, 'exam_card_number' => 'CARD-EA']);
+
+        $this->hiddenExamId = $hiddenExam->id;
+        $this->hiddenParticipantAId = $hiddenParticipantA->id;
+        $this->hiddenParticipantBId = $hiddenParticipantB->id;
+        $this->essayExamId = $essayExam->id;
+        $this->essayQuestionId = $essayQuestion->id;
+        $this->essayParticipantAId = $essayParticipantA->id;
     }
 
     // -----------------------------------------------------------------
@@ -688,6 +726,125 @@ class SecureExamAttemptTest extends TestCase
         $attemptId = $this->startFor($this->userA);
         $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/events", ['event_type' => 'not_a_real_event'])->assertStatus(422);
         $this->assertSame(0, ExamAttemptEvent::count());
+    }
+
+    // -----------------------------------------------------------------
+    // Result visibility (show_result)
+    // -----------------------------------------------------------------
+
+    public function test_submit_shows_result_when_show_result_true(): void
+    {
+        $attemptId = $this->startFor($this->userA);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q2Id]}", ['selected_option_id' => $s['q'.$this->q2Id.'o'.$this->q2o1Id]])->assertStatus(200);
+
+        $res = $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit");
+        $res->assertStatus(200)
+            ->assertJsonPath('data.attempt.status', 'submitted')
+            ->assertJsonPath('data.result.total_score', 30)
+            ->assertJsonPath('data.result.correct_count', 2)
+            ->assertJsonPath('data.result.status', 'graded');
+    }
+
+    public function test_submit_hides_result_when_show_result_false(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $attemptId = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+
+        $res = $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit");
+        $res->assertStatus(200)
+            ->assertJsonPath('data.attempt.status', 'submitted')
+            ->assertJsonMissingPath('data.result');
+
+        // The result is still scored and persisted; only visibility is hidden.
+        $stored = ExamResult::where('participant_id', $this->hiddenParticipantAId)->first();
+        $this->assertNotNull($stored, 'result must still be calculated and persisted');
+        $this->assertSame(10, (int) $stored->total_score);
+    }
+
+    public function test_result_list_shows_when_show_result_true(): void
+    {
+        $attemptId = $this->startFor($this->userA);
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q2Id]}", ['selected_option_id' => $s['q'.$this->q2Id.'o'.$this->q2o1Id]])->assertStatus(200);
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        $res = $this->asA()->getJson('/api/student/exam-results')->assertStatus(200);
+        $rows = $res->json('data');
+        $this->assertNotEmpty($rows);
+        $this->assertSame(30, (int) $rows[0]['total_score']);
+        $this->assertSame('graded', $rows[0]['status']);
+    }
+
+    public function test_result_list_hides_when_show_result_false(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $attemptId = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $s = $this->snap($attemptId);
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        // Hidden results are absent from the listing entirely.
+        $res = $this->asA()->getJson('/api/student/exam-results')->assertStatus(200);
+        $this->assertSame([], $res->json('data'));
+
+        // Persisted result still exists server-side.
+        $this->assertNotNull(ExamResult::where('participant_id', $this->hiddenParticipantAId)->first());
+    }
+
+    public function test_result_visibility_ignores_client_flag(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $attemptId = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        // A client-supplied visibility parameter must not bypass the rule.
+        $res = $this->asA()->getJson('/api/student/exam-results?show_result=true')->assertStatus(200);
+        $this->assertSame([], $res->json('data'));
+    }
+
+    public function test_hidden_result_isolation_between_students(): void
+    {
+        // Student A submits the hidden exam; Student B (also a participant)
+        // and Student C (non-participant) must not obtain any result row.
+        $this->actingAs($this->userA, 'sanctum');
+        $attemptA = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptA}/submit")->assertStatus(200);
+
+        $this->actingAs($this->userB, 'sanctum');
+        $attemptB = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$attemptB}/submit")->assertStatus(200);
+
+        $this->actingAs($this->userA, 'sanctum');
+        $this->assertSame([], $this->getJson('/api/student/exam-results')->assertStatus(200)->json('data'));
+        $this->actingAs($this->userB, 'sanctum');
+        $this->assertSame([], $this->getJson('/api/student/exam-results')->assertStatus(200)->json('data'));
+        $this->actingAs($this->userC, 'sanctum');
+        $this->assertSame([], $this->getJson('/api/student/exam-results')->assertStatus(200)->json('data'));
+    }
+
+    public function test_pending_essay_result_preserved_when_show_result_true(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $attemptId = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->essayExamId])->assertStatus(200)->json('data.id');
+        $aq = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->where('source_question_id', $this->essayQuestionId)->firstOrFail();
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$aq->id}", ['essay_answer' => 'Jawaban esai.'])->assertStatus(200);
+
+        $res = $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit");
+        $res->assertStatus(200)
+            ->assertJsonPath('data.result.status', 'pending')
+            ->assertJsonPath('data.result.total_score', 0);
+
+        $answer = ExamAnswer::where('exam_attempt_id', $attemptId)->where('attempt_question_id', $aq->id)->first();
+        $this->assertSame('pending_manual', $answer->grade_status);
+
+        $rows = $this->asA()->getJson('/api/student/exam-results')->assertStatus(200)->json('data');
+        $this->assertNotEmpty($rows);
+        $this->assertSame('pending', $rows[0]['status']);
     }
 
     // -----------------------------------------------------------------

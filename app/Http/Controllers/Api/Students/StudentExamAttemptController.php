@@ -351,10 +351,17 @@ class StudentExamAttemptController extends Controller
 
             $result = app(\App\Services\Examination\ExamScoringService::class)->scoreAttempt($attempt);
 
-            return $this->ok('Attempt submitted.', [
+            // Result visibility is authoritative from the exam record: the
+            // result is always calculated and persisted, but the aggregate is
+            // only exposed to the student when `show_result` is true.
+            $response = [
                 'attempt' => $this->attemptPayload($attempt, $now),
-                'result' => $result,
-            ]);
+            ];
+            if ((bool) ($attempt->exam?->show_result ?? false)) {
+                $response['result'] = $result;
+            }
+
+            return $this->ok('Attempt submitted.', $response);
         });
     }
 

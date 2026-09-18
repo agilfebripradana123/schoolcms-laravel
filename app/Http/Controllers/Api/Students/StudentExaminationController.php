@@ -111,6 +111,14 @@ class StudentExaminationController extends Controller
         $results = ExamResult::whereIn('participant_id', $participantIds)
             ->with(['participant.exam.subject'])
             ->get()
+            // Result visibility is authoritative from the exam record: results
+            // of exams with `show_result = false` are never exposed to students.
+            ->filter(function (ExamResult $result) {
+                $exam = $result->participant?->exam;
+
+                return (bool) ($exam->show_result ?? false);
+            })
+            ->values()
             ->map(fn (ExamResult $result) => new StudentExamResultResource($result));
 
         return response()->json([
