@@ -566,4 +566,27 @@ class StudentHistoryFinalizeTest extends TestCase
             'is_public' => false,
         ]);
     }
+
+    public function test_resource_exposes_draft_finality(): void
+    {
+        $history = $this->history();
+        $data = $this->getJson("/api/student-histories/{$history->id}")->assertOk()->json('data');
+
+        $this->assertFalse($data['is_final']);
+        $this->assertNull($data['finalized_at']);
+        $this->assertNull($data['finalized_by']);
+    }
+
+    public function test_resource_exposes_finalized_finality(): void
+    {
+        $this->card();
+        $history = $this->history();
+        $this->postJson("/api/student-histories/{$history->id}/finalize")->assertStatus(200);
+
+        $data = $this->getJson("/api/student-histories/{$history->id}")->assertOk()->json('data');
+
+        $this->assertTrue($data['is_final']);
+        $this->assertNotNull($data['finalized_at']);
+        $this->assertSame($this->admin->id, $data['finalized_by']);
+    }
 }

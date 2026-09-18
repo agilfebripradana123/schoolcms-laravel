@@ -2,11 +2,11 @@
 
 namespace App\Http\Resources\Students;
 
+use App\Http\Resources\Academic\AcademicYearResource;
+use App\Http\Resources\Academic\SchoolClassResource;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-use App\Http\Resources\Academic\SchoolClassResource;
-use App\Http\Resources\Academic\AcademicYearResource;
 class StudentHistoryResource extends JsonResource
 {
     public function toArray(Request $request): array
@@ -18,6 +18,9 @@ class StudentHistoryResource extends JsonResource
             'academic_year_id' => $this->academic_year_id,
             'status' => $this->status,
             'notes' => $this->notes,
+            'is_final' => (bool) $this->is_final,
+            'finalized_at' => $this->finalized_at?->toISOString(),
+            'finalized_by' => $this->finalized_by,
             'student' => new StudentResource($this->whenLoaded('student')),
             'class' => new SchoolClassResource($this->whenLoaded('schoolClass')),
             'academic_year' => new AcademicYearResource($this->whenLoaded('academicYear')),
