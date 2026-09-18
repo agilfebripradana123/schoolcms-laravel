@@ -59,6 +59,7 @@ class TeacherExamGradingController extends Controller
             $answer = $answers->get($question->id);
 
             return [
+                'exam_answer_id' => $answer->id ?? null,
                 'attempt_question_id' => $question->id,
                 'question_text' => $question->question_text,
                 'max_points' => (int) $question->points,

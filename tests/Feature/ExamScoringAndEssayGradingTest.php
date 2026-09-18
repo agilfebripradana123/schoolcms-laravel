@@ -260,6 +260,30 @@ class ExamScoringAndEssayGradingTest extends TestCase
             $t->unsignedBigInteger('source_id')->nullable();
             $t->timestamps();
         });
+        Schema::create('grade_assessments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->unsignedBigInteger('semester_id');
+            $t->string('assessment_category', 50);
+            $t->unsignedInteger('assessment_sequence');
+            $t->string('assessment_name', 100)->nullable();
+            $t->decimal('score', 5, 2);
+            $t->decimal('max_score', 5, 2)->default(100.00);
+            $t->decimal('weight', 5, 2)->nullable();
+            $t->string('source_type', 50)->nullable();
+            $t->unsignedBigInteger('source_id')->nullable();
+            $t->date('assessed_date')->nullable();
+            $t->text('notes')->nullable();
+            $t->timestamps();
+            $t->unique(
+                ['student_id', 'subject_id', 'class_id', 'academic_year_id', 'semester_id', 'assessment_category', 'assessment_sequence'],
+                'uq_grade_assessments_cat_seq'
+            );
+            $t->index(['source_type', 'source_id']);
+        });
     }
 
     private function seedFixture(): void
@@ -304,6 +328,11 @@ class ExamScoringAndEssayGradingTest extends TestCase
         $this->ipaExam = Exam::create(['subject_id' => $ipa->id, 'title' => 'IPA Exam', 'duration_minutes' => 30, 'max_attempts' => 1, 'status' => 'published']);
         ExamQuestion::create(['exam_id' => $this->ipaExam->id, 'question_id' => $this->qIpaEssay->id, 'position' => 1, 'points' => 30]);
         $this->participantIpaA = ExamParticipant::create(['exam_id' => $this->ipaExam->id, 'student_id' => $this->studentA->id, 'exam_card_number' => 'CARD-IPA', 'status' => 'registered', 'login_allowed' => true]);
+
+        // Multi-attempt fixture (teacherA MTK scope) for grading answer-id isolation.
+        $this->multiAttemptExam = Exam::create(['subject_id' => $mtk->id, 'title' => 'MTK Multi-Attempt', 'duration_minutes' => 60, 'max_attempts' => 2, 'status' => 'published']);
+        ExamQuestion::create(['exam_id' => $this->multiAttemptExam->id, 'question_id' => $this->qEssay->id, 'position' => 1, 'points' => 20]);
+        ExamParticipant::create(['exam_id' => $this->multiAttemptExam->id, 'student_id' => $this->studentA->id, 'exam_card_number' => 'CARD-MULTI', 'status' => 'registered', 'login_allowed' => true]);
     }
 
     private function makeQuestion(Subject $subject, string $text, string $type, int $points, array $options): QuestionBank
@@ -363,6 +392,13 @@ class ExamScoringAndEssayGradingTest extends TestCase
         Sanctum::actingAs($teacher);
 
         return $this->putJson("/api/teacher/exam-grading/answers/{$examAnswerId}", $payload);
+    }
+
+    private function gradingShowAs(User $teacher, int $attemptId)
+    {
+        Sanctum::actingAs($teacher);
+
+        return $this->getJson("/api/teacher/exam-grading/attempts/{$attemptId}");
     }
 
     // -----------------------------------------------------------------
@@ -557,6 +593,60 @@ class ExamScoringAndEssayGradingTest extends TestCase
         $this->gradeAs($this->teacherB, $answerId, ['score' => 30])->assertStatus(200);
         // Teacher A (MTK) may not grade IPA exam answers.
         $this->gradeAs($this->teacherA, $answerId, ['score' => 5])->assertStatus(404);
+    }
+
+    public function test_teacher_grading_show_exposes_essay_answer_id(): void
+    {
+        $attemptId = $this->startAs($this->studentA->user, $this->exam->id);
+        $aqEssay = $this->aqFor($attemptId, $this->qEssay->id);
+        $this->answer($attemptId, $aqEssay, null, 'Jawaban esai siswa.');
+        $this->submit($attemptId);
+
+        $expectedAnswerId = ExamAnswer::where('exam_attempt_id', $attemptId)
+            ->where('attempt_question_id', $aqEssay->id)
+            ->first()->id;
+
+        $res = $this->gradingShowAs($this->teacherA, $attemptId)->assertStatus(200);
+        $essay = collect($res->json('data.essays'))->firstWhere('attempt_question_id', $aqEssay->id);
+
+        $this->assertNotNull($essay, 'essay must be present in the grading payload');
+        $this->assertArrayHasKey('exam_answer_id', $essay, 'essay payload must expose exam_answer_id');
+        $this->assertSame($expectedAnswerId, $essay['exam_answer_id'], 'exam_answer_id must equal the real exam_answers.id for the attempt');
+        $this->assertSame($aqEssay->id, $essay['attempt_question_id'], 'attempt_question_id preserved');
+    }
+
+    public function test_grading_show_answer_id_matches_requested_attempt_on_multi_attempt(): void
+    {
+        $attempt1 = $this->startAs($this->studentA->user, $this->multiAttemptExam->id);
+        $aq1 = $this->aqFor($attempt1, $this->qEssay->id);
+        $this->answer($attempt1, $aq1, null, 'Jawaban percobaan pertama.');
+        $this->submit($attempt1);
+
+        $attempt2 = $this->startAs($this->studentA->user, $this->multiAttemptExam->id);
+        $aq2 = $this->aqFor($attempt2, $this->qEssay->id);
+        $this->answer($attempt2, $aq2, null, 'Jawaban percobaan kedua.');
+        $this->submit($attempt2);
+
+        $answer1Id = ExamAnswer::where('exam_attempt_id', $attempt1)->where('attempt_question_id', $aq1->id)->value('id');
+        $answer2Id = ExamAnswer::where('exam_attempt_id', $attempt2)->where('attempt_question_id', $aq2->id)->value('id');
+        $this->assertNotSame($answer1Id, $answer2Id, 'each attempt must own a distinct exam_answers row');
+
+        $essays1 = collect($this->gradingShowAs($this->teacherA, $attempt1)->assertStatus(200)->json('data.essays'));
+        $essays2 = collect($this->gradingShowAs($this->teacherA, $attempt2)->assertStatus(200)->json('data.essays'));
+
+        $this->assertSame($answer1Id, $essays1->firstWhere('attempt_question_id', $aq1->id)['exam_answer_id'], 'attempt 1 must expose its own answer id');
+        $this->assertSame($answer2Id, $essays2->firstWhere('attempt_question_id', $aq2->id)['exam_answer_id'], 'attempt 2 must expose its own answer id, not attempt 1');
+    }
+
+    public function test_teacher_grading_show_out_of_scope_is_not_found(): void
+    {
+        $attemptId = $this->startAs($this->studentA->user, $this->exam->id);
+        $aqEssay = $this->aqFor($attemptId, $this->qEssay->id);
+        $this->answer($attemptId, $aqEssay, null, 'x');
+        $this->submit($attemptId);
+
+        // Teacher B (IPA only) must not read the MTK attempt grading payload.
+        $this->gradingShowAs($this->teacherB, $attemptId)->assertStatus(404);
     }
 
     public function test_client_cannot_inject_scoring_truth(): void
