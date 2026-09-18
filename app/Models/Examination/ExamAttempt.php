@@ -5,6 +5,7 @@ namespace App\Models\Examination;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 /**
@@ -74,6 +75,11 @@ class ExamAttempt extends Model
     public function attemptQuestions(): HasMany
     {
         return $this->hasMany(ExamAttemptQuestion::class, 'exam_attempt_id');
+    }
+
+    public function result(): HasOne
+    {
+        return $this->hasOne(ExamResult::class, 'exam_attempt_id');
     }
 
     public function isActive(): bool

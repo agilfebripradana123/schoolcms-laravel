@@ -142,7 +142,7 @@ class TeacherExamGradingController extends Controller
         // academic Grade, re-sync so the academic value never goes stale —
         // UNLESS the grade is finalized/locked (Grade.is_final stays the
         // authoritative lock; a locked academic value is never overwritten).
-        $resultRow = \App\Models\Examination\ExamResult::where('participant_id', $attempt->exam_participant_id)->first();
+        $resultRow = \App\Models\Examination\ExamResult::where('exam_attempt_id', $attempt->id)->first();
         $gradeIntegration = app(ExamGradeIntegrationService::class);
         if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
             // Source tracing lives on GradeAssessment; resolve the matching
@@ -198,6 +198,13 @@ class TeacherExamGradingController extends Controller
 
         if (! $resultRow) {
             return $this->notFound('Exam result not found.');
+        }
+
+        // Grade Sync operates on the participant's EFFECTIVE result only.
+        // Legacy NULL-attempt rows and older non-effective attempts are not
+        // syncable; authorization/eligibility errors stay opaque.
+        if (! app(ExamScoringService::class)->isEffectiveResult($resultRow)) {
+            return $this->unprocessable('Exam result is not eligible for synchronization.');
         }
 
         $outcome = app(ExamGradeIntegrationService::class)->sync($resultRow);

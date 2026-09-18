@@ -638,6 +638,39 @@ class ExamScoringAndEssayGradingTest extends TestCase
         $this->assertSame($answer2Id, $essays2->firstWhere('attempt_question_id', $aq2->id)['exam_answer_id'], 'attempt 2 must expose its own answer id, not attempt 1');
     }
 
+    public function test_regrading_attempt_one_does_not_modify_attempt_two_result(): void
+    {
+        $attempt1 = $this->startAs($this->studentA->user, $this->multiAttemptExam->id);
+        $aq1 = $this->aqFor($attempt1, $this->qEssay->id);
+        $this->answer($attempt1, $aq1, null, 'Jawaban percobaan pertama.');
+        $this->submit($attempt1);
+
+        $attempt2 = $this->startAs($this->studentA->user, $this->multiAttemptExam->id);
+        $aq2 = $this->aqFor($attempt2, $this->qEssay->id);
+        $this->answer($attempt2, $aq2, null, 'Jawaban percobaan kedua.');
+        $this->submit($attempt2);
+
+        $participantId = ExamAttempt::find($attempt2)->exam_participant_id;
+        $this->assertSame(2, ExamResult::where('participant_id', $participantId)->count(), 'per-attempt result rows');
+
+        $attempt1Result = ExamResult::where('exam_attempt_id', $attempt1)->firstOrFail();
+        $attempt2Result = ExamResult::where('exam_attempt_id', $attempt2)->firstOrFail();
+        $this->assertNotSame($attempt1Result->id, $attempt2Result->id, 'results must be distinct per attempt');
+
+        // Regrade attempt #1 only — attempt #2 must stay untouched.
+        $answer1Id = ExamAnswer::where('exam_attempt_id', $attempt1)->where('attempt_question_id', $aq1->id)->first()->id;
+        $this->gradeAs($this->teacherA, $answer1Id, ['score' => 14])->assertStatus(200);
+
+        $attempt1Result->refresh();
+        $attempt2Result->refresh();
+
+        $this->assertSame(14, (int) $attempt1Result->total_score, 'attempt 1 result updated');
+        $this->assertSame('graded', $attempt1Result->status);
+        $this->assertSame(0, (int) $attempt2Result->total_score, 'attempt 2 result untouched by regrade of attempt 1');
+        $this->assertSame('pending', $attempt2Result->status, 'attempt 2 essay remains pending_manual');
+        $this->assertSame(2, ExamResult::where('participant_id', $participantId)->count(), 'no duplicate rows after regrade');
+    }
+
     public function test_teacher_grading_show_out_of_scope_is_not_found(): void
     {
         $attemptId = $this->startAs($this->studentA->user, $this->exam->id);

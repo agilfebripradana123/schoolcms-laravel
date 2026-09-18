@@ -41,4 +41,9 @@ class ExamResult extends Model
     {
         return $this->belongsTo(ExamParticipant::class, 'participant_id');
     }
+
+    public function attempt(): BelongsTo
+    {
+        return $this->belongsTo(ExamAttempt::class, 'exam_attempt_id');
+    }
 }

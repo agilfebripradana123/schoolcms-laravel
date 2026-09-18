@@ -63,7 +63,7 @@ class TeacherExamResultController extends Controller
 
         $subjectIds = $this->subjectIds($teacher->id);
 
-        $query = ExamResult::with(['participant.exam', 'participant.student'])
+        $query = ExamResult::with(['participant.exam', 'participant.student', 'attempt'])
             ->whereHas('participant.exam', function ($q) use ($subjectIds) {
                 $q->whereIn('subject_id', $subjectIds);
             });
@@ -106,7 +106,7 @@ class TeacherExamResultController extends Controller
 
         $subjectIds = $this->subjectIds($teacher->id);
 
-        $result = ExamResult::with(['participant.exam', 'participant.student'])
+        $result = ExamResult::with(['participant.exam', 'participant.student', 'attempt'])
             ->where('id', $id)
             ->whereHas('participant.exam', function ($q) use ($subjectIds) {
                 $q->whereIn('subject_id', $subjectIds);

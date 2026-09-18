@@ -6,15 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Examination\StoreExamResultRequest;
 use App\Http\Requests\Api\Examination\UpdateExamResultRequest;
 use App\Http\Resources\Examination\ExamResultResource;
+use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamResult;
 use App\Services\Examination\ExamGradeIntegrationService;
+use App\Services\Examination\ExamScoringService;
 use Illuminate\Http\JsonResponse;
 
 class ExamResultController extends Controller
 {
     public function index(\Illuminate\Http\Request $request): JsonResponse
     {
-        $query = ExamResult::query()->with('participant');
+        $query = ExamResult::query()->with(['participant', 'attempt']);
 
         if ($request->filled('participant_id')) {
             $query->where('participant_id', $request->input('participant_id'));
@@ -41,7 +43,7 @@ class ExamResultController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $result = ExamResult::with('participant')->find($id);
+        $result = ExamResult::with(['participant', 'attempt'])->find($id);
 
         if (!$result) {
             return response()->json([
@@ -60,8 +62,29 @@ class ExamResultController extends Controller
 
     public function store(StoreExamResultRequest $request): JsonResponse
     {
-        $result = ExamResult::create($request->validated());
-        $result->load('participant');
+        $attemptId = (int) $request->validated()['exam_attempt_id'];
+
+        if (ExamResult::where('exam_attempt_id', $attemptId)->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This attempt already has a result.',
+                'data' => null,
+            ], 422);
+        }
+
+        $attempt = ExamAttempt::find($attemptId);
+        if (! $attempt) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Attempt not found.',
+                'data' => null,
+            ], 404);
+        }
+
+        // Results are generated exclusively by the scoring service; identity is
+        // bound to the attempt. Client-provided score fields are never honored.
+        app(ExamScoringService::class)->scoreAttempt($attempt);
+        $result = ExamResult::with(['participant', 'attempt'])->where('exam_attempt_id', $attemptId)->firstOrFail();
 
         return response()->json([
             'success' => true,
@@ -72,9 +95,9 @@ class ExamResultController extends Controller
 
     public function update(UpdateExamResultRequest $request, int $id): JsonResponse
     {
-        $result = ExamResult::find($id);
+        $result = ExamResult::with('attempt')->find($id);
 
-        if (!$result) {
+        if (! $result) {
             return response()->json([
                 'success' => false,
                 'message' => 'Exam result not found',
@@ -82,8 +105,18 @@ class ExamResultController extends Controller
             ], 404);
         }
 
-        $result->update($request->validated());
-        $result->load('participant');
+        $attempt = $result->attempt;
+        if (! $attempt) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Legacy results without an attempt are not mutable.',
+                'data' => null,
+            ], 422);
+        }
+
+        // Recompute through the authoritative scoring service only.
+        app(ExamScoringService::class)->scoreAttempt($attempt);
+        $result->load(['participant', 'attempt']);
 
         return response()->json([
             'success' => true,
@@ -128,6 +161,14 @@ class ExamResultController extends Controller
                 'message' => 'Exam result not found',
                 'data' => null,
             ], 404);
+        }
+
+        if (! app(ExamScoringService::class)->isEffectiveResult($result)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Exam result is not eligible for synchronization.',
+                'data' => null,
+            ], 422);
         }
 
         $outcome = app(ExamGradeIntegrationService::class)->sync($result);

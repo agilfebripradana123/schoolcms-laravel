@@ -245,7 +245,7 @@ class SecureExamAttemptTest extends TestCase
             $t->string('status')->default('pending');
             $t->dateTime('graded_at')->nullable();
             $t->timestamps();
-            $t->unique(['participant_id'], 'uq_exam_results_participant');
+            $t->unique('exam_attempt_id', 'uq_exam_results_attempt');
         });
         Schema::create('exam_attempts', function (Blueprint $t) {
             $t->id();
@@ -403,7 +403,7 @@ class SecureExamAttemptTest extends TestCase
             'title' => 'Ujian Tanpa Hasil',
             'duration_minutes' => 60,
             'total_questions' => 1,
-            'max_attempts' => 1,
+            'max_attempts' => 2,
             'shuffle_questions' => false,
             'shuffle_options' => false,
             'show_result' => false,
@@ -432,6 +432,10 @@ class SecureExamAttemptTest extends TestCase
         $this->essayExamId = $essayExam->id;
         $this->essayQuestionId = $essayQuestion->id;
         $this->essayParticipantAId = $essayParticipantA->id;
+
+        // Teacher profile within MTK subject scope (for grade-sync tests).
+        $this->guruTeacher = Teacher::create(['user_id' => $guruUser->id, 'full_name' => 'Guru X']);
+        TeacherAssignment::create(['teacher_id' => $this->guruTeacher->id, 'class_id' => 1, 'subject_id' => $math->id, 'academic_year_id' => $year->id]);
     }
 
     // -----------------------------------------------------------------
@@ -845,6 +849,93 @@ class SecureExamAttemptTest extends TestCase
         $rows = $this->asA()->getJson('/api/student/exam-results')->assertStatus(200)->json('data');
         $this->assertNotEmpty($rows);
         $this->assertSame('pending', $rows[0]['status']);
+    }
+
+    // -----------------------------------------------------------------
+    // Per-attempt results (B8)
+    // -----------------------------------------------------------------
+
+    public function test_each_attempt_gets_its_own_result(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $a1 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a1}/submit")->assertStatus(200);
+
+        $a2 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a2}/submit")->assertStatus(200);
+
+        $participantId = ExamAttempt::find($a2)->exam_participant_id;
+        $rows = ExamResult::where('participant_id', $participantId)->get();
+
+        $this->assertSame(2, $rows->count(), 'each submitted attempt must own its own result row');
+        $this->assertEqualsCanonicalizing([$a1, $a2], $rows->pluck('exam_attempt_id')->all());
+    }
+
+    public function test_resubmitting_same_attempt_updates_same_result(): void
+    {
+        $attemptId = $this->startFor($this->userA);
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        $this->assertSame(1, ExamResult::where('exam_attempt_id', $attemptId)->count(), 'resubmission must update the same attempt result');
+    }
+
+    public function test_effective_result_defaults_to_latest_submitted_attempt(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $a1 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a1}/submit")->assertStatus(200);
+        $a2 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a2}/submit")->assertStatus(200);
+
+        $participantId = ExamAttempt::find($a2)->exam_participant_id;
+        $effective = app(\App\Services\Examination\ExamScoringService::class)->effectiveResult((int) $participantId);
+
+        $this->assertNotNull($effective);
+        $this->assertSame($a2, (int) $effective->exam_attempt_id, 'effective result must be the latest submitted attempt');
+    }
+
+    public function test_non_effective_attempt_cannot_grade_sync(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $a1 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a1}/submit")->assertStatus(200);
+        $a2 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a2}/submit")->assertStatus(200);
+
+        $a1Result = ExamResult::where('exam_attempt_id', $a1)->firstOrFail();
+
+        // Attempt #1 is not the effective result -> sync must be rejected.
+        $this->actingAs($this->guruUser, 'sanctum');
+        $this->postJson("/api/teacher/exam-grading/results/{$a1Result->id}/grade-sync")->assertStatus(422);
+    }
+
+    public function test_b6_show_result_false_still_hides_all_attempt_results(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $h1 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$h1}/submit")->assertStatus(200)->assertJsonMissingPath('data.result');
+        $h2 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->hiddenExamId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$h2}/submit")->assertStatus(200)->assertJsonMissingPath('data.result');
+
+        $this->assertSame(1, ExamResult::where('exam_attempt_id', $h2)->count(), 'results still persisted server-side');
+        $this->assertSame([], $this->getJson('/api/student/exam-results')->assertStatus(200)->json('data'), 'hidden results must never appear');
+    }
+
+    public function test_b6_show_result_true_exposes_attempt_aware_results(): void
+    {
+        $this->actingAs($this->userA, 'sanctum');
+        $a1 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a1}/submit")->assertStatus(200);
+        $a2 = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->postJson("/api/student/exam-attempts/{$a2}/submit")->assertStatus(200);
+
+        $rows = $this->getJson('/api/student/exam-results')->assertStatus(200)->json('data');
+
+        $this->assertCount(2, $rows, 'one attempt-aware result row per visible attempt');
+        $this->assertSame(2, $rows[0]['attempt_number'], 'latest attempt first');
+        $this->assertSame(1, $rows[1]['attempt_number']);
+        $this->assertEqualsCanonicalizing([$a1, $a2], array_column($rows, 'exam_attempt_id'));
     }
 
     // -----------------------------------------------------------------

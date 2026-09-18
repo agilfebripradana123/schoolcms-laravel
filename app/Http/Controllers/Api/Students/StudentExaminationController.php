@@ -109,7 +109,7 @@ class StudentExaminationController extends Controller
         $student = $request->attributes->get('student_profile');
         $participantIds = ExamParticipant::where('student_id', $student->id)->pluck('id');
         $results = ExamResult::whereIn('participant_id', $participantIds)
-            ->with(['participant.exam.subject'])
+            ->with(['participant.exam.subject', 'attempt'])
             ->get()
             // Result visibility is authoritative from the exam record: results
             // of exams with `show_result = false` are never exposed to students.
@@ -118,6 +118,10 @@ class StudentExaminationController extends Controller
 
                 return (bool) ($exam->show_result ?? false);
             })
+            // Attempt-aware listing: only attempt-linked results are presented,
+            // latest attempt first. Legacy NULL-attempt rows stay historical.
+            ->filter(fn (ExamResult $result) => $result->exam_attempt_id !== null)
+            ->sortByDesc(fn (ExamResult $result) => [$result->exam_attempt_id ?? 0, $result->id])
             ->values()
             ->map(fn (ExamResult $result) => new StudentExamResultResource($result));
 

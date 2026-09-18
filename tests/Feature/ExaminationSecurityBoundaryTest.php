@@ -195,6 +195,7 @@ class ExaminationSecurityBoundaryTest extends TestCase
         Schema::create('exam_results', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('participant_id');
+            $t->unsignedBigInteger('exam_attempt_id')->nullable();
             $t->decimal('total_score', 10, 2)->default(0);
             $t->unsignedInteger('correct_count')->default(0);
             $t->unsignedInteger('wrong_count')->default(0);
@@ -307,8 +308,20 @@ class ExaminationSecurityBoundaryTest extends TestCase
             'answered_at' => now(),
         ]);
 
+        // Attempt + result belonging to student A (attempt-linked, per-attempt contract).
+        $attemptA = ExamAttempt::create([
+            'exam_participant_id' => $participantA->id,
+            'exam_id' => $exam->id,
+            'attempt_number' => 1,
+            'status' => 'submitted',
+            'started_at' => now(),
+            'submitted_at' => now(),
+            'expires_at' => now()->addMinutes(60),
+        ]);
+
         ExamResult::create([
             'participant_id' => $participantA->id,
+            'exam_attempt_id' => $attemptA->id,
             'total_score' => 90,
             'grade' => 'A',
             'status' => 'graded',

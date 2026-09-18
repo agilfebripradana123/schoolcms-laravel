@@ -105,14 +105,51 @@ class ExamScoringService
         ];
 
         ExamResult::updateOrCreate(
-            ['participant_id' => $attempt->exam_participant_id],
+            ['exam_attempt_id' => $attempt->id],
             array_merge($resultPayload, [
+                'participant_id' => $attempt->exam_participant_id,
                 'exam_attempt_id' => $attempt->id,
                 'graded_at' => now(),
             ])
         );
 
         return $resultPayload;
+    }
+
+    /**
+     * Resolve the participant's effective result.
+     *
+     * Approved B8 policy (finalization is not active yet):
+     *   finalized result if one exists, otherwise the latest submitted
+     *   attempt's result. Deterministic, attempt-timestamp based; never
+     *   score-based, never aggregates attempts.
+     */
+    public function effectiveResult(int $participantId): ?ExamResult
+    {
+        $latest = ExamResult::join('exam_attempts', 'exam_attempts.id', '=', 'exam_results.exam_attempt_id')
+            ->where('exam_results.participant_id', $participantId)
+            ->whereNotNull('exam_results.exam_attempt_id')
+            ->orderByDesc('exam_attempts.submitted_at')
+            ->orderByDesc('exam_attempts.id')
+            ->select('exam_results.*')
+            ->first();
+
+        return $latest;
+    }
+
+    /**
+     * True when the given result is the participant's effective result and is
+     * attempt-linked (legacy NULL-attempt rows are never effective).
+     */
+    public function isEffectiveResult(ExamResult $result): bool
+    {
+        if ($result->exam_attempt_id === null) {
+            return false;
+        }
+
+        $effective = $this->effectiveResult((int) $result->participant_id);
+
+        return $effective !== null && (int) $effective->id === (int) $result->id;
     }
 
     /**
