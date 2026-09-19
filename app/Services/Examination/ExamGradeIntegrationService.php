@@ -77,8 +77,16 @@ class ExamGradeIntegrationService
         $exam = $attempt->exam;
         $participant = $result->participant;
 
-        if (! $exam || ! $participant) {
-            return $this->notEligible('Exam or participant for this result is missing.');
+        // B20-F5 (central rule, covers admin + teacher sync and F1/F5 re-sync):
+        // a soft-deleted (archived/non-operational) exam can never be the source
+        // of a NEW or re-synchronized academic grade. Exam uses SoftDeletes, so a
+        // null relation is the reliable trashed signal.
+        if ($exam === null) {
+            return $this->notEligible('Exam is no longer operational and cannot be synchronized.');
+        }
+
+        if (! $participant) {
+            return $this->notEligible('Participant for this result is missing.');
         }
 
         $type = $exam->exam_type;

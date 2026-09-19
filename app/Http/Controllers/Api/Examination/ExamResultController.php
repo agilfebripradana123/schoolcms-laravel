@@ -234,11 +234,11 @@ class ExamResultController extends Controller
         });
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
         // B20-F2-F3/F4: deletion now runs in a transaction against a locked row,
         // so it can never delete a result that a concurrent finalize is locking.
-        return DB::transaction(function () use ($id) {
+        return DB::transaction(function () use ($request, $id) {
             $result = ExamResult::where('id', $id)->lockForUpdate()->first();
 
             if (! $result) {
@@ -269,7 +269,29 @@ class ExamResultController extends Controller
                 ], 422);
             }
 
+            // Provenance captured before deletion; the row object still carries
+            // them after delete(), so building the audit here is safe.
+            $participant = $result->participant;
+            $attempt = $result->attempt;
+
             $result->delete();
+
+            // B20-F5: bounded domain audit for a successful result deletion so
+            // provenance forensics never depend on the generic delete listener.
+            \App\Models\System\AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_result_deleted',
+                'model' => ExamResult::class,
+                'model_id' => $result->id,
+                'description' => json_encode(array_filter([
+                    'result_id' => $result->id,
+                    'attempt_id' => $result->exam_attempt_id,
+                    'student_id' => $participant?->student_id,
+                    'exam_id' => $attempt?->exam_id,
+                ])),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -351,6 +373,18 @@ class ExamResultController extends Controller
                     'message' => 'Exam result not found',
                     'data' => null,
                 ], 404);
+            }
+
+            // B20-F5: a result whose parent exam is soft-deleted (archived into
+            // non-operational history) must not be newly finalized. Existing
+            // finalized history stays untouched; the rule only blocks NEW locks.
+            $attempt = $result->attempt;
+            if ($attempt !== null && $attempt->exam === null) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Result belongs to a non-operational exam and cannot be finalized.',
+                    'data' => null,
+                ], 422);
             }
 
             $scoring = app(ExamScoringService::class);

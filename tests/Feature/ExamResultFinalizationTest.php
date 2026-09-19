@@ -947,4 +947,110 @@ class ExamResultFinalizationTest extends TestCase
         $this->assertSame($resultB, GradeAssessment::first()->source_id, 'later effective result replaces the source');
         $this->assertSame(1, Grade::count(), 'one academic grade per slot');
     }
+
+    // -----------------------------------------------------------------
+    // B20-F5 — result delete / provenance
+    // -----------------------------------------------------------------
+
+    public function test_unsynced_non_final_result_can_be_deleted(): void
+    {
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $attemptId = ExamResult::find($resultId)->exam_attempt_id;
+
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-results/{$resultId}")->assertStatus(200);
+
+        $this->assertNull(ExamResult::find($resultId), 'unsynced non-final result is deletable');
+        $this->assertSame(1, ExamAttempt::where('exam_participant_id', $this->participantMC->id)->count(), 'attempt history survives result deletion');
+    }
+
+    public function test_result_deletion_emits_bounded_domain_audit(): void
+    {
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $attemptId = (int) ExamResult::find($resultId)->exam_attempt_id;
+
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-results/{$resultId}")->assertStatus(200);
+
+        $audit = AuditLog::where('action', 'exam_result_deleted')->where('model_id', $resultId)->firstOrFail();
+        $desc = json_decode($audit->description, true);
+        $this->assertSame($this->admin->id, $audit->user_id);
+        $this->assertSame($resultId, $desc['result_id']);
+        $this->assertSame($attemptId, $desc['attempt_id'], 'attempt provenance included');
+        $this->assertSame($this->studentA->id, $desc['student_id'], 'student provenance included');
+        $this->assertSame($this->examMC->id, $desc['exam_id'], 'exam provenance included');
+    }
+
+    public function test_result_belonging_to_soft_deleted_exam_cannot_be_finalized(): void
+    {
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        Exam::find($this->examMC->id)->delete();
+
+        $this->adminFinalize($resultId)->assertStatus(422)
+            ->assertJsonPath('message', 'Result belongs to a non-operational exam and cannot be finalized.');
+
+        $result = ExamResult::find($resultId);
+        $this->assertNotNull($result, 'result history is preserved');
+        $this->assertFalse((bool) $result->is_final, 'finalization refused for a non-operational exam');
+        $this->assertNotNull(Exam::withTrashed()->find($this->examMC->id)->deleted_at);
+    }
+
+    public function test_result_belonging_to_soft_deleted_exam_cannot_grade_sync(): void
+    {
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        Exam::find($this->examMC->id)->delete();
+
+        $res = $this->adminSync($resultId);
+        $res->assertStatus(422)->assertJsonPath('message', 'Exam is no longer operational and cannot be synchronized.');
+
+        $this->assertSame(0, Grade::count(), 'no grade created for a non-operational exam');
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_synced')->count());
+    }
+
+    public function test_soft_deleted_exam_preserves_attempt_and_result_history(): void
+    {
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+
+        Exam::find($this->examMC->id)->delete();
+
+        $this->assertSame(1, ExamAttempt::where('exam_participant_id', $this->participantMC->id)->count(), 'attempt rows survive exam soft delete');
+        $this->assertSame(1, ExamResult::where('participant_id', $this->participantMC->id)->count(), 'result row survives exam soft delete');
+    }
+
+    public function test_effective_result_is_deterministic_after_deleting_latest_permitted_result(): void
+    {
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $attempt2 = $this->startAsA($this->examMC->id);
+        $aqB = ExamAttemptQuestion::where('exam_attempt_id', $attempt2)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correctB = $aqB->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attempt2}/answers/{$aqB->id}", ['selected_option_id' => $correctB])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attempt2}/submit")->assertStatus(200);
+        $resultB = ExamResult::where('participant_id', $this->participantMC->id)->latest('id')->value('id');
+        $this->assertSame($resultB, app(ExamScoringService::class)->effectiveResult($this->participantMC->id)->id, 'B effective before delete');
+
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-results/{$resultB}")->assertStatus(200);
+
+        $effective = app(ExamScoringService::class)->effectiveResult($this->participantMC->id);
+        $this->assertNotNull($effective);
+        $this->assertSame($resultA, (int) $effective->id, 'effective re-derives deterministically to the older attempt after deleting the newer permitted result');
+    }
+
+    public function test_deleting_non_effective_result_preserves_effective(): void
+    {
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $attempt2 = $this->startAsA($this->examMC->id);
+        $aqB = ExamAttemptQuestion::where('exam_attempt_id', $attempt2)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correctB = $aqB->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attempt2}/answers/{$aqB->id}", ['selected_option_id' => $correctB])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attempt2}/submit")->assertStatus(200);
+        $resultB = ExamResult::where('participant_id', $this->participantMC->id)->latest('id')->value('id');
+        $this->assertNotSame($resultA, $resultB);
+
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-results/{$resultA}")->assertStatus(200);
+
+        $effective = app(ExamScoringService::class)->effectiveResult($this->participantMC->id);
+        $this->assertSame($resultB, (int) $effective->id, 'deleting a non-effective result does not disturb the effective one');
+    }
 }
