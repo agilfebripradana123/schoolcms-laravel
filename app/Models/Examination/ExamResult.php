@@ -20,6 +20,8 @@ class ExamResult extends Model
         'grade',
         'status',
         'graded_at',
+        'is_final',
+        'finalized_at',
     ];
 
     protected function casts(): array
@@ -32,6 +34,8 @@ class ExamResult extends Model
             'unanswered_count' => 'integer',
             'percentage' => 'decimal:2',
             'graded_at' => 'datetime',
+            'is_final' => 'boolean',
+            'finalized_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

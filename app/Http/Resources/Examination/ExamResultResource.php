@@ -21,6 +21,8 @@ class ExamResultResource extends JsonResource
             'unanswered_count' => $this->unanswered_count,
             'grade' => $this->grade,
             'status' => $this->status,
+            'is_final' => (bool) $this->is_final,
+            'finalized_at' => $this->finalized_at?->toISOString(),
             'graded_at' => $this->graded_at?->toISOString(),
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),

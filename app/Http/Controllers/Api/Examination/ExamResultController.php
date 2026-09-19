@@ -138,6 +138,16 @@ class ExamResultController extends Controller
                 ], 404);
             }
 
+            // A finalized result is immutable; reject before any scoring runs
+            // and never write a recompute audit for a rejected request.
+            if ($result->is_final) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Result is finalized and cannot be modified.',
+                    'data' => null,
+                ], 422);
+            }
+
             $attempt = $result->attempt;
             if (! $attempt) {
                 return response()->json([
@@ -197,6 +207,16 @@ class ExamResultController extends Controller
             ], 404);
         }
 
+        // A finalized result is immutable and must never be deleted through the
+        // normal mutation path (no grade/assessment change, no deletion audit).
+        if ($result->is_final) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Result is finalized and cannot be deleted.',
+                'data' => null,
+            ], 422);
+        }
+
         $result->delete();
 
         return response()->json([
@@ -253,5 +273,60 @@ class ExamResultController extends Controller
                 'grade' => $outcome['grade'],
             ],
         ]);
+    }
+
+    /**
+     * POST /api/exam-results/{exam_result}/finalize   (admin, manage-exams)
+     * Lock a result as final. Idempotent: re-finalizing never rewrites the
+     * original finalized_at / finalized_by. A finalized result becomes immutable
+     * through the normal mutation paths (recompute, delete, re-score).
+     */
+    public function finalize(Request $request, int $id): JsonResponse
+    {
+        return DB::transaction(function () use ($request, $id) {
+            $result = ExamResult::where('id', $id)->lockForUpdate()->first();
+
+            if (! $result) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam result not found',
+                    'data' => null,
+                ], 404);
+            }
+
+            $alreadyFinal = (bool) $result->is_final;
+
+            if (! $alreadyFinal) {
+                $result->is_final = true;
+                $result->finalized_at = now();
+                $result->save();
+            }
+
+            \App\Models\System\AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_result_finalized',
+                'model' => ExamResult::class,
+                'model_id' => $result->id,
+                'description' => json_encode([
+                    'result_id' => $result->id,
+                    'exam_attempt_id' => $result->exam_attempt_id,
+                    'participant_id' => $result->participant_id,
+                    'is_final' => true,
+                    // Actor identity rides on the audit user_id; the schema has
+                    // no finalized_by column to stamp, so it is quoted here too
+                    // for bounded traceability.
+                    'finalized_by' => $request->user()?->id,
+                    'was_already_final' => $alreadyFinal,
+                ]),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => $alreadyFinal ? 'Exam result is already finalized.' : 'Exam result finalized successfully.',
+                'data' => new ExamResultResource($result->load(['participant', 'attempt'])),
+            ]);
+        });
     }
 }

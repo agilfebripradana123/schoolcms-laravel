@@ -126,6 +126,13 @@ class TeacherExamGradingController extends Controller
             return $this->unprocessable(sprintf('Score must be between 0 and %d.', $maxPoints));
         }
 
+        // A finalized result is immutable: reject the regrade before any answer
+        // mutation, so neither the essay answer nor the result can change.
+        $finalized = \App\Models\Examination\ExamResult::where('exam_attempt_id', $attempt->id)->first();
+        if ($finalized && $finalized->is_final) {
+            return $this->unprocessable('Result is finalized and cannot be modified.');
+        }
+
         // Answer mutation + result recomputation (+ optional re-sync) + audit
         // share a single transaction so a failed operation leaves nothing behind.
         return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $answer, $attempt, $question, $score) {

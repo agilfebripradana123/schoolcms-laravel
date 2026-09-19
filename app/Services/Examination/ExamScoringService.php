@@ -31,6 +31,22 @@ class ExamScoringService
 {
     public function scoreAttempt(ExamAttempt $attempt): array
     {
+        // A finalized result is immutable: never re-score it and never touch
+        // its answer rows. Callers that must reject earlier already return 422;
+        // this guard keeps every scoring path safe even without that check.
+        $existing = ExamResult::where('exam_attempt_id', $attempt->id)->first();
+        if ($existing !== null && $existing->is_final) {
+            return [
+                'total_score' => (float) $existing->total_score,
+                'correct_count' => (int) $existing->correct_count,
+                'wrong_count' => (int) $existing->wrong_count,
+                'unanswered_count' => (int) $existing->unanswered_count,
+                'percentage' => (float) $existing->percentage,
+                'grade' => $existing->grade,
+                'status' => $existing->status,
+            ];
+        }
+
         $attemptQuestions = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
             ->orderBy('position')
             ->get();
@@ -119,22 +135,25 @@ class ExamScoringService
     /**
      * Resolve the participant's effective result.
      *
-     * Approved B8 policy (finalization is not active yet):
+     * Contract:
      *   finalized result if one exists, otherwise the latest submitted
      *   attempt's result. Deterministic, attempt-timestamp based; never
      *   score-based, never aggregates attempts.
+     *
+     * A finalized result wins even when a later submitted (non-finalized)
+     * attempt exists. Non-finalized resolution keeps the historical semantics
+     * (latest submitted_at, attempt id tie-break).
      */
     public function effectiveResult(int $participantId): ?ExamResult
     {
-        $latest = ExamResult::join('exam_attempts', 'exam_attempts.id', '=', 'exam_results.exam_attempt_id')
+        return ExamResult::join('exam_attempts', 'exam_attempts.id', '=', 'exam_results.exam_attempt_id')
             ->where('exam_results.participant_id', $participantId)
             ->whereNotNull('exam_results.exam_attempt_id')
+            ->orderByDesc('exam_results.is_final')
             ->orderByDesc('exam_attempts.submitted_at')
             ->orderByDesc('exam_attempts.id')
             ->select('exam_results.*')
             ->first();
-
-        return $latest;
     }
 
     /**

@@ -257,6 +257,8 @@ class ExamScoringAndEssayGradingTest extends TestCase
             $t->string('grade', 5)->nullable();
             $t->string('status')->default('pending');
             $t->dateTime('graded_at')->nullable();
+            $t->boolean('is_final')->default(false);
+            $t->dateTime('finalized_at')->nullable();
             $t->timestamps();
         });
         Schema::create('grades', function (Blueprint $t) {
