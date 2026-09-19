@@ -8,7 +8,10 @@ use App\Http\Requests\Api\Examination\UpdateExamScheduleRequest;
 use App\Http\Resources\Examination\ExamScheduleResource;
 use App\Models\Examination\Exam;
 use App\Models\Examination\ExamSchedule;
+use App\Models\System\AuditLog;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ExamScheduleController extends Controller
 {
@@ -84,7 +87,21 @@ class ExamScheduleController extends Controller
             return $this->unprocessable($check['message']);
         }
 
-        $schedule = ExamSchedule::create($validated);
+        $schedule = DB::transaction(function () use ($request, $validated) {
+            $schedule = ExamSchedule::create($validated);
+
+            AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_schedule_created',
+                'model' => ExamSchedule::class,
+                'model_id' => $schedule->id,
+                'description' => json_encode($this->scheduleContext($schedule)),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            return $schedule;
+        });
 
         return response()->json([
             'success' => true,
@@ -95,49 +112,113 @@ class ExamScheduleController extends Controller
 
     public function update(UpdateExamScheduleRequest $request, int $id): JsonResponse
     {
-        $schedule = ExamSchedule::find($id);
+        return DB::transaction(function () use ($request, $id) {
+            $schedule = ExamSchedule::where('id', $id)->lockForUpdate()->first();
 
-        if (!$schedule) {
-            return $this->notFound('Exam schedule not found.');
-        }
+            if (!$schedule) {
+                return $this->notFound('Exam schedule not found.');
+            }
 
-        if (! $this->isSchedulable($schedule->exam)) {
-            return $this->unprocessable(sprintf("Exam with status '%s' cannot be rescheduled.", $schedule->exam->status));
-        }
+            if (! $this->isSchedulable($schedule->exam)) {
+                return $this->unprocessable(sprintf("Exam with status '%s' cannot be rescheduled.", $schedule->exam->status));
+            }
 
-        $check = $this->validateWindow($request->validated());
-        if (! $check['ok']) {
-            return $this->unprocessable($check['message']);
-        }
+            $check = $this->validateWindow($request->validated());
+            if (! $check['ok']) {
+                return $this->unprocessable($check['message']);
+            }
 
-        $schedule->update($request->validated());
+            $tracked = ['exam_date', 'room_id', 'session_id', 'start_datetime', 'end_datetime'];
+            $before = [];
+            foreach ($tracked as $field) {
+                $before[$field] = $this->fieldValue($schedule, $field);
+            }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Exam schedule updated successfully',
-            'data' => new ExamScheduleResource($schedule->load(['exam', 'room', 'session'])),
-        ]);
+            $schedule->update($request->validated());
+
+            $changed = [];
+            foreach ($tracked as $field) {
+                if ($before[$field] != $this->fieldValue($schedule, $field)) {
+                    $changed[] = $field;
+                }
+            }
+
+            if (! empty($changed)) {
+                AuditLog::create([
+                    'user_id' => $request->user()?->id,
+                    'action' => 'exam_schedule_updated',
+                    'model' => ExamSchedule::class,
+                    'model_id' => $schedule->id,
+                    'description' => json_encode(array_merge($this->scheduleContext($schedule), [
+                        'changed_fields' => $changed,
+                        'before' => $before,
+                    ])),
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Exam schedule updated successfully',
+                'data' => new ExamScheduleResource($schedule->load(['exam', 'room', 'session'])),
+            ]);
+        });
     }
 
-    public function destroy(int $id): JsonResponse
+    private function fieldValue(ExamSchedule $schedule, string $field)
     {
-        $schedule = ExamSchedule::find($id);
+        $value = $schedule->getAttribute($field);
 
-        if (!$schedule) {
-            return $this->notFound('Exam schedule not found.');
-        }
+        return $value instanceof \DateTimeInterface ? $value->toISOString() : $value;
+    }
 
-        if (! $this->isSchedulable($schedule->exam)) {
-            return $this->unprocessable(sprintf("Exam with status '%s' cannot have its schedule removed.", $schedule->exam->status));
-        }
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        return DB::transaction(function () use ($request, $id) {
+            $schedule = ExamSchedule::where('id', $id)->lockForUpdate()->first();
 
-        $schedule->delete();
+            if (!$schedule) {
+                return $this->notFound('Exam schedule not found.');
+            }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Exam schedule deleted successfully',
-            'data' => null,
-        ]);
+            if (! $this->isSchedulable($schedule->exam)) {
+                return $this->unprocessable(sprintf("Exam with status '%s' cannot have its schedule removed.", $schedule->exam->status));
+            }
+
+            $context = $this->scheduleContext($schedule);
+
+            $schedule->delete();
+
+            AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_schedule_deleted',
+                'model' => ExamSchedule::class,
+                'model_id' => $id,
+                'description' => json_encode($context),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Exam schedule deleted successfully',
+                'data' => null,
+            ]);
+        });
+    }
+
+    private function scheduleContext(ExamSchedule $schedule): array
+    {
+        return array_filter([
+            'schedule_id' => $schedule->id,
+            'exam_id' => $schedule->exam_id,
+            'exam_date' => $schedule->exam_date?->toDateString(),
+            'start_datetime' => $schedule->start_datetime?->toISOString(),
+            'end_datetime' => $schedule->end_datetime?->toISOString(),
+            'session_id' => $schedule->session_id,
+            'room_id' => $schedule->room_id,
+        ], fn ($v) => $v !== null);
     }
 
     /**

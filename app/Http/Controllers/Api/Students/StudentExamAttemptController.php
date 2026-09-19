@@ -11,6 +11,7 @@ use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamAttemptQuestionOption;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamQuestion;
+use App\Models\Examination\ExamResult;
 use App\Models\Examination\ExamSchedule;
 use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
@@ -327,7 +328,7 @@ class StudentExamAttemptController extends Controller
         }
 
         // active or expired both finalize here.
-        return DB::transaction(function () use ($attempt, $now) {
+        return DB::transaction(function () use ($request, $attempt, $now) {
             // B20-F6 lock-order: lock the PARTICIPANT before the ATTEMPT, the
             // same order start() uses, so start() and submit() can never deadlock.
             $participant = ExamParticipant::where('id', $attempt->exam_participant_id)->lockForUpdate()->first();
@@ -352,6 +353,30 @@ class StudentExamAttemptController extends Controller
             }
 
             $result = app(\App\Services\Examination\ExamScoringService::class)->scoreAttempt($attempt);
+
+            // B20-F8-M1: a result produced through the student submit path emits
+            // the same bounded domain event as the admin result-generation path,
+            // inside the same transaction (rollback removes it together).
+            $resultRow = ExamResult::where('exam_attempt_id', $attempt->id)->first();
+            if ($resultRow !== null) {
+                \App\Models\System\AuditLog::create([
+                    'user_id' => $request?->user()?->id,
+                    'action' => 'exam_result_generated',
+                    'model' => ExamResult::class,
+                    'model_id' => $resultRow->id,
+                    'description' => json_encode([
+                        'result_id' => $resultRow->id,
+                        'exam_attempt_id' => $resultRow->exam_attempt_id,
+                        'participant_id' => $resultRow->participant_id,
+                        'total_score' => $resultRow->total_score,
+                        'percentage' => $resultRow->percentage,
+                        'grade' => $resultRow->grade,
+                        'status' => $resultRow->status,
+                    ]),
+                    'ip_address' => $request?->ip(),
+                    'user_agent' => $request?->userAgent(),
+                ]);
+            }
 
             // Result visibility is authoritative from the exam record: the
             // result is always calculated and persisted, but the aggregate is

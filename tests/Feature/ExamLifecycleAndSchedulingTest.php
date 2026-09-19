@@ -12,6 +12,7 @@ use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
 use App\Models\Facilities\Room;
 use App\Models\Students\Student;
+use App\Models\System\AuditLog;
 use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -557,5 +558,72 @@ class ExamLifecycleAndSchedulingTest extends TestCase
     {
         $this->actAsAdmin();
         $this->putJson('/api/exams/'.$this->draftExam->id, ['status' => 'published'])->assertStatus(200);
+    }
+
+    // -----------------------------------------------------------------
+    // B20-F8-M2 — exam schedule domain audit
+    // -----------------------------------------------------------------
+
+    public function test_schedule_create_emits_exam_schedule_created(): void
+    {
+        $this->actAsAdmin();
+
+        $this->postJson('/api/exam-schedules', $this->schedulePayload($this->draftExam, null, null))->assertStatus(201);
+
+        $audit = AuditLog::where('action', 'exam_schedule_created')->firstOrFail();
+        $this->assertSame($this->admin->id, $audit->user_id);
+        $desc = json_decode($audit->description, true);
+        $this->assertSame($this->draftExam->id, $desc['exam_id']);
+        $this->assertNotNull($desc['schedule_id']);
+        $this->assertSame($this->session->id, $desc['session_id']);
+        $this->assertSame($this->room->id, $desc['room_id']);
+    }
+
+    public function test_schedule_update_emits_exam_schedule_updated_with_changed_context(): void
+    {
+        $this->actAsAdmin();
+        $scheduleId = $this->postJson('/api/exam-schedules', $this->schedulePayload($this->draftExam, '2026-09-20 08:00:00', '2026-09-20 10:00:00'))
+            ->assertStatus(201)->json('data.id');
+
+        $this->putJson("/api/exam-schedules/{$scheduleId}", [
+            'exam_id' => $this->draftExam->id,
+            'room_id' => $this->room->id,
+            'session_id' => $this->session->id,
+            'exam_date' => now()->addDays(1)->toDateString(),
+            'start_datetime' => '2026-09-21 08:00:00',
+            'end_datetime' => '2026-09-21 10:00:00',
+        ])->assertStatus(200);
+
+        $audit = AuditLog::where('action', 'exam_schedule_updated')->where('model_id', $scheduleId)->firstOrFail();
+        $desc = json_decode($audit->description, true);
+        $this->assertSame($this->draftExam->id, $desc['exam_id']);
+        $this->assertContains('exam_date', $desc['changed_fields']);
+        $this->assertArrayHasKey('before', $desc);
+        $this->assertArrayHasKey('exam_date', $desc['before']);
+    }
+
+    public function test_schedule_delete_emits_exam_schedule_deleted(): void
+    {
+        $this->actAsAdmin();
+        $scheduleId = $this->postJson('/api/exam-schedules', $this->schedulePayload($this->draftExam, null, null))->assertStatus(201)->json('data.id');
+
+        $this->deleteJson("/api/exam-schedules/{$scheduleId}")->assertStatus(200);
+
+        $audit = AuditLog::where('action', 'exam_schedule_deleted')->where('model_id', $scheduleId)->firstOrFail();
+        $desc = json_decode($audit->description, true);
+        $this->assertSame($this->draftExam->id, $desc['exam_id']);
+        $this->assertSame($this->session->id, $desc['session_id']);
+    }
+
+    public function test_rejected_schedule_mutation_emits_no_success_event(): void
+    {
+        // Schedule on an operational (ongoing) exam is rejected and must not
+        // leave a created/updated/deleted success event.
+        $this->actAsAdmin();
+        $this->postJson('/api/exam-schedules', $this->schedulePayload($this->ongoingExam, null, null))->assertStatus(422);
+
+        $this->assertSame(0, AuditLog::where('action', 'exam_schedule_created')->count());
+        $this->assertSame(0, AuditLog::where('action', 'exam_schedule_updated')->count());
+        $this->assertSame(0, AuditLog::where('action', 'exam_schedule_deleted')->count());
     }
 }

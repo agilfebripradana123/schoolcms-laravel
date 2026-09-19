@@ -1071,6 +1071,48 @@ class SecureExamAttemptTest extends TestCase
         $this->assertSame('active', ExamAttempt::find($second)->status);
     }
 
+    public function test_student_submit_emits_exam_result_generated_domain_event(): void
+    {
+        $this->asA();
+        $attemptId = $this->startFor($this->userA);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        $result = ExamResult::where('exam_attempt_id', $attemptId)->firstOrFail();
+        $audit = AuditLog::where('action', 'exam_result_generated')->where('model_id', $result->id)->firstOrFail();
+        $this->assertSame($this->userA->id, $audit->user_id, 'actor is the submitting student');
+        $desc = json_decode($audit->description, true);
+        $this->assertSame($result->id, $desc['result_id']);
+        $this->assertSame($attemptId, $desc['exam_attempt_id']);
+        $this->assertSame('graded', $desc['status']);
+        $this->assertNotNull($desc['percentage']);
+
+        // Exactly one domain event for one submission (duplicate submit is idempotent).
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $this->assertSame(1, AuditLog::where('action', 'exam_result_generated')->where('model_id', $result->id)->count());
+
+        // Generic audit still exists alongside the domain event.
+        $this->assertSame(1, AuditLog::where('action', 'create')->where('model', 'ExamResult')->where('model_id', $result->id)->count());
+    }
+
+    public function test_rolled_back_student_submit_leaves_no_domain_event(): void
+    {
+        $this->asA();
+        $attemptId = $this->startFor($this->userA);
+
+        try {
+            \Illuminate\Support\Facades\DB::transaction(function () use ($attemptId) {
+                $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+                throw new \RuntimeException('force rollback');
+            });
+            $this->fail('expected rollback exception');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('force rollback', $e->getMessage());
+        }
+
+        $this->assertSame(0, AuditLog::where('action', 'exam_result_generated')->count(), 'rolled-back submit leaves no domain event');
+        $this->assertSame(0, ExamResult::where('exam_attempt_id', $attemptId)->count(), 'rolled-back submit leaves no result row');
+    }
+
     // -----------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------
