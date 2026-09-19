@@ -6,6 +6,7 @@ use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamResult;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Server-authoritative attempt scoring (Phase 2H).
@@ -31,20 +32,22 @@ class ExamScoringService
 {
     public function scoreAttempt(ExamAttempt $attempt): array
     {
+        $finalPayload = fn (ExamResult $r) => [
+            'total_score' => (float) $r->total_score,
+            'correct_count' => (int) $r->correct_count,
+            'wrong_count' => (int) $r->wrong_count,
+            'unanswered_count' => (int) $r->unanswered_count,
+            'percentage' => (float) $r->percentage,
+            'grade' => $r->grade,
+            'status' => $r->status,
+        ];
+
         // A finalized result is immutable: never re-score it and never touch
         // its answer rows. Callers that must reject earlier already return 422;
         // this guard keeps every scoring path safe even without that check.
         $existing = ExamResult::where('exam_attempt_id', $attempt->id)->first();
         if ($existing !== null && $existing->is_final) {
-            return [
-                'total_score' => (float) $existing->total_score,
-                'correct_count' => (int) $existing->correct_count,
-                'wrong_count' => (int) $existing->wrong_count,
-                'unanswered_count' => (int) $existing->unanswered_count,
-                'percentage' => (float) $existing->percentage,
-                'grade' => $existing->grade,
-                'status' => $existing->status,
-            ];
+            return $finalPayload($existing);
         }
 
         $attemptQuestions = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
@@ -120,14 +123,37 @@ class ExamScoringService
             'status' => $pendingEssays > 0 ? 'pending' : 'graded',
         ];
 
-        ExamResult::updateOrCreate(
-            ['exam_attempt_id' => $attempt->id],
-            array_merge($resultPayload, [
-                'participant_id' => $attempt->exam_participant_id,
-                'exam_attempt_id' => $attempt->id,
-                'graded_at' => now(),
-            ])
-        );
+        // B20-F6 (finality race): the write is finality-guarded. The result row
+        // is locked and re-read immediately before mutation — a result that a
+        // concurrent transaction finalized between the early guard above and
+        // this write is never overwritten. ScoreAttempt's callers already run in
+        // a transaction; nested transaction here degrades to a savepoint.
+        $guard = DB::transaction(function () use ($attempt, $resultPayload) {
+            $locked = ExamResult::where('exam_attempt_id', $attempt->id)->lockForUpdate()->first();
+
+            if ($locked !== null && $locked->is_final) {
+                return 'final';
+            }
+
+            ExamResult::updateOrCreate(
+                ['exam_attempt_id' => $attempt->id],
+                array_merge($resultPayload, [
+                    'participant_id' => $attempt->exam_participant_id,
+                    'exam_attempt_id' => $attempt->id,
+                    'graded_at' => now(),
+                ])
+            );
+
+            return 'ok';
+        });
+
+        if ($guard === 'final') {
+            $final = ExamResult::where('exam_attempt_id', $attempt->id)->first();
+
+            if ($final !== null && $final->is_final) {
+                return $finalPayload($final);
+            }
+        }
 
         return $resultPayload;
     }

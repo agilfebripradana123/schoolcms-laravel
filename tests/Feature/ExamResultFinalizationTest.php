@@ -1053,4 +1053,34 @@ class ExamResultFinalizationTest extends TestCase
         $effective = app(ExamScoringService::class)->effectiveResult($this->participantMC->id);
         $this->assertSame($resultB, (int) $effective->id, 'deleting a non-effective result does not disturb the effective one');
     }
+
+    public function test_finality_guard_never_overwrites_finalized_result_in_transaction(): void
+    {
+        // B20-F6 finality-race regression: an answer mutated after submission
+        // would make a naive re-scoring compute a different result. Even inside
+        // a single transaction that finalized the result first, scoreAttempt must
+        // not overwrite the finalized values.
+        $attemptId = $this->startAsA($this->examMC->id);
+        $aq = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correct = $aq->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$aq->id}", ['selected_option_id' => $correct])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $resultId = ExamResult::where('exam_attempt_id', $attemptId)->value('id');
+        $this->assertNotNull($resultId);
+
+        $wrong = $aq->options->firstWhere('is_correct', false)->id;
+        ExamAnswer::where('exam_attempt_id', $attemptId)->update(['selected_attempt_option_id' => $wrong, 'is_correct' => false]);
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($resultId, $attemptId) {
+            ExamResult::where('id', $resultId)->lockForUpdate()->update(['is_final' => true, 'finalized_at' => now()]);
+
+            $payload = app(ExamScoringService::class)->scoreAttempt(ExamAttempt::find($attemptId));
+
+            $after = ExamResult::find($resultId);
+            $this->assertTrue((bool) $after->is_final);
+            $this->assertSame(100.0, (float) $after->percentage, 'finalized value is never overwritten by a later scoring write');
+            $this->assertSame(10.0, (float) $after->total_score);
+            $this->assertSame(100.0, (float) $payload['percentage'], 'payload reports the finalized value');
+        });
+    }
 }

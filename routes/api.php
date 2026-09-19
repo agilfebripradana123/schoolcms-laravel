@@ -456,6 +456,11 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
 
+    Route::middleware('role:Admin,Administrator')->group(function () {
+        Route::post('/exam-attempts/{exam_attempt}/expire', [ExamAttemptController::class, 'expire']);
+        Route::post('/exam-attempts/{exam_attempt}/extend', [ExamAttemptController::class, 'extend']);
+    });
+
     // =========================
     // EXAM RESULTS
     // =========================

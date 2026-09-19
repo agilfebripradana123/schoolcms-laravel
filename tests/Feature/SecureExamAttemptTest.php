@@ -18,6 +18,7 @@ use App\Models\Examination\QuestionOption;
 use App\Models\Staff\Teacher;
 use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Student;
+use App\Models\System\AuditLog;
 use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -336,6 +337,9 @@ class SecureExamAttemptTest extends TestCase
     {
         $roleGuru = Role::create(['name' => 'Guru']);
         $roleSiswa = Role::create(['name' => 'Siswa']);
+        $roleAdmin = Role::create(['name' => 'Admin']);
+
+        $this->admin = User::create(['name' => 'Admin B20', 'email' => 'admin@b20.test', 'username' => 'adminb20', 'password' => bcrypt('x'), 'role_id' => $roleAdmin->id]);
 
         $year = AcademicYear::create(['name' => '2025/2026', 'is_active' => true]);
         $math = Subject::create(['code' => 'MTK', 'name' => 'Matematika']);
@@ -949,6 +953,122 @@ class SecureExamAttemptTest extends TestCase
         $this->assertSame(2, $rows[0]['attempt_number'], 'latest attempt first');
         $this->assertSame(1, $rows[1]['attempt_number']);
         $this->assertEqualsCanonicalizing([$a1, $a2], array_column($rows, 'exam_attempt_id'));
+    }
+
+    // -----------------------------------------------------------------
+    // B20-F6 — admin operational attempt controls
+    // -----------------------------------------------------------------
+
+    public function test_admin_manually_expires_active_attempt_preserves_data(): void
+    {
+        $this->asA();
+        $attemptId = $this->startFor($this->userA);
+        $refs = $this->snap($attemptId);
+        $aq = $refs['q'.$this->q1Id];
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$aq}", ['selected_option_id' => $refs['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $snapshotCount = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->count();
+        $answerCount = ExamAnswer::where('exam_attempt_id', $attemptId)->count();
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$attemptId}/expire")->assertStatus(200);
+
+        $attempt = ExamAttempt::find($attemptId);
+        $this->assertSame('expired', $attempt->status);
+        $this->assertSame($snapshotCount, ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->count(), 'snapshot preserved');
+        $this->assertSame($answerCount, ExamAnswer::where('exam_attempt_id', $attemptId)->count(), 'answers preserved');
+        $this->assertSame(0, ExamResult::where('exam_attempt_id', $attemptId)->count(), 'manual expire creates no result');
+        $audit = AuditLog::where('action', 'exam_attempt_manually_expired')->where('model_id', $attemptId)->firstOrFail();
+        $this->assertSame($attemptId, json_decode($audit->description, true)['attempt_id']);
+        $this->assertSame($this->admin->id, $audit->user_id);
+    }
+
+    public function test_manual_expire_rejects_submitted_attempt(): void
+    {
+        $attemptId = $this->startFor($this->userA);
+        $this->asA();
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$attemptId}/expire")->assertStatus(422)
+            ->assertJsonPath('message', 'A submitted attempt cannot be expired.');
+        $this->assertSame('submitted', ExamAttempt::find($attemptId)->status);
+    }
+
+    public function test_admin_extend_updates_only_expires_at(): void
+    {
+        $this->asA();
+        $attemptId = $this->startFor($this->userA);
+        $attempt = ExamAttempt::find($attemptId);
+        $startedAt = $attempt->started_at?->toISOString();
+        $attemptNumber = (int) $attempt->attempt_number;
+        $previousExpires = $attempt->expires_at?->copy();
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$attemptId}/extend", ['minutes' => 30])->assertStatus(200);
+
+        $attempt->refresh();
+        $this->assertTrue($attempt->expires_at?->eq($previousExpires->addMinutes(30)), 'expires_at extended additively');
+        $this->assertSame($startedAt, $attempt->started_at?->toISOString(), 'started_at untouched');
+        $this->assertSame($attemptNumber, (int) $attempt->attempt_number, 'attempt_number untouched');
+        $this->assertSame('active', $attempt->status);
+        $audit = AuditLog::where('action', 'exam_attempt_extended')->where('model_id', $attemptId)->firstOrFail();
+        $this->assertSame(30, json_decode($audit->description, true)['minutes']);
+    }
+
+    public function test_admin_extend_rejects_submitted_and_expired(): void
+    {
+        $submitted = $this->startFor($this->userA);
+        $this->asA();
+        $this->postJson("/api/student/exam-attempts/{$submitted}/submit")->assertStatus(200);
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$submitted}/extend", ['minutes' => 30])->assertStatus(422)
+            ->assertJsonPath('message', 'A submitted attempt cannot be extended.');
+
+        $this->asA();
+        $expired = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$expired}/expire")->assertStatus(200);
+        $this->postJson("/api/exam-attempts/{$expired}/extend", ['minutes' => 30])->assertStatus(422)
+            ->assertJsonPath('message', 'An expired attempt cannot be extended.');
+    }
+
+    public function test_expired_attempt_cannot_be_revived_by_extension(): void
+    {
+        $this->asA();
+        $attemptId = $this->startFor($this->userA);
+        ExamAttempt::where('id', $attemptId)->update(['expires_at' => now()->subMinutes(5)]);
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$attemptId}/extend", ['minutes' => 30])->assertStatus(422)
+            ->assertJsonPath('message', 'An expired attempt cannot be extended.');
+        $this->assertSame('active', ExamAttempt::find($attemptId)->status, 'not revived, status unchanged');
+    }
+
+    public function test_admin_extend_rejects_non_positive_minutes(): void
+    {
+        $this->asA();
+        $attemptId = $this->startFor($this->userA);
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$attemptId}/extend", ['minutes' => 0])->assertStatus(422);
+        $this->postJson("/api/exam-attempts/{$attemptId}/extend", ['minutes' => 300])->assertStatus(422);
+    }
+
+    public function test_next_attempt_still_allowed_after_manual_expire(): void
+    {
+        // Retake remains intact: a manually expired attempt counts toward the
+        // budget but does not block a new attempt while max_attempts allows it.
+        $this->asA();
+        $first = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->actingAs($this->admin, 'sanctum');
+        $this->postJson("/api/exam-attempts/{$first}/expire")->assertStatus(200);
+
+        $this->asA();
+        $second = (int) $this->postJson('/api/student/exam-attempts/start', ['exam_id' => $this->examShuffleId])->assertStatus(200)->json('data.id');
+        $this->assertNotSame($first, $second);
+        $this->assertSame(2, (int) ExamAttempt::find($second)->attempt_number, 'new attempt_number on retake');
+        $this->assertSame('active', ExamAttempt::find($second)->status);
     }
 
     // -----------------------------------------------------------------

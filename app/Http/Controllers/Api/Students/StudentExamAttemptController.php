@@ -328,6 +328,9 @@ class StudentExamAttemptController extends Controller
 
         // active or expired both finalize here.
         return DB::transaction(function () use ($attempt, $now) {
+            // B20-F6 lock-order: lock the PARTICIPANT before the ATTEMPT, the
+            // same order start() uses, so start() and submit() can never deadlock.
+            $participant = ExamParticipant::where('id', $attempt->exam_participant_id)->lockForUpdate()->first();
             $attempt = ExamAttempt::where('id', $attempt->id)->lockForUpdate()->first();
 
             if (!$attempt) {
@@ -342,7 +345,6 @@ class StudentExamAttemptController extends Controller
             $attempt->submitted_at = $now;
             $attempt->save();
 
-            $participant = ExamParticipant::lockForUpdate()->find($attempt->exam_participant_id);
             if ($participant) {
                 $participant->status = 'completed';
                 $participant->completed_at = $now;
