@@ -10,6 +10,7 @@ use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamResult;
 use App\Services\Examination\ExamGradeIntegrationService;
 use App\Services\Examination\ExamScoringService;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -127,8 +128,17 @@ class ExamResultController extends Controller
 
     public function update(UpdateExamResultRequest $request, int $id): JsonResponse
     {
-        return DB::transaction(function () use ($request, $id) {
-            $result = ExamResult::with('attempt')->find($id);
+        $auditContext = [
+            'user_id' => $request->user()?->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ];
+
+        return DB::transaction(function () use ($request, $id, $auditContext) {
+            // B20-F2-F7: the recompute decision and every related guard run under
+            // a row lock so they cannot interleave with a concurrent finalize or
+            // delete (both of which acquire the same lock).
+            $result = ExamResult::where('id', $id)->lockForUpdate()->first();
 
             if (! $result) {
                 return response()->json([
@@ -138,8 +148,8 @@ class ExamResultController extends Controller
                 ], 404);
             }
 
-            // A finalized result is immutable; reject before any scoring runs
-            // and never write a recompute audit for a rejected request.
+            // A finalized result is immutable; reject before any scoring runs and
+            // never write a recompute audit for a rejected request.
             if ($result->is_final) {
                 return response()->json([
                     'success' => false,
@@ -156,6 +166,13 @@ class ExamResultController extends Controller
                     'data' => null,
                 ], 422);
             }
+
+            $scoring = app(ExamScoringService::class);
+            $integration = app(ExamGradeIntegrationService::class);
+
+            // B20-F2-F1: remember whether this result already feeds an academic
+            // grade before the recompute runs, so it can be propagated after.
+            $wasSynced = $integration->isSynced($result);
 
             $before = [
                 'total_score' => $result->total_score,
@@ -187,6 +204,28 @@ class ExamResultController extends Controller
                 'user_agent' => $request->userAgent(),
             ]);
 
+            // B20-F2-F1: a synced result that stays effective is re-synchronized
+            // so the academic value never goes stale; a locked Grade slot is never
+            // overwritten and the recompute is left in place.
+            if ($wasSynced && $scoring->isEffectiveResult($result)) {
+                $state = $this->resyncGradeIfMutable($integration, $result, $auditContext);
+
+                if ($state === 'locked') {
+                    \App\Models\System\AuditLog::create([
+                        'user_id' => $request->user()?->id,
+                        'action' => 'exam_grade_resync_locked',
+                        'model' => ExamResult::class,
+                        'model_id' => $result->id,
+                        'description' => json_encode([
+                            'result_id' => $result->id,
+                            'reason' => 'Academic grade slot is locked; resync skipped.',
+                        ]),
+                        'ip_address' => $request->ip(),
+                        'user_agent' => $request->userAgent(),
+                    ]);
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Exam result updated successfully',
@@ -197,33 +236,47 @@ class ExamResultController extends Controller
 
     public function destroy(int $id): JsonResponse
     {
-        $result = ExamResult::find($id);
+        // B20-F2-F3/F4: deletion now runs in a transaction against a locked row,
+        // so it can never delete a result that a concurrent finalize is locking.
+        return DB::transaction(function () use ($id) {
+            $result = ExamResult::where('id', $id)->lockForUpdate()->first();
 
-        if (!$result) {
+            if (! $result) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam result not found',
+                    'data' => null,
+                ], 404);
+            }
+
+            // A finalized result is immutable and must never be deleted through the
+            // normal mutation path (no grade/assessment change, no deletion audit).
+            if ($result->is_final) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Result is finalized and cannot be deleted.',
+                    'data' => null,
+                ], 422);
+            }
+
+            // B20-F2-F3: a synced result is the live source of an academic grade;
+            // deleting it would leave a dangling provenance, so it is rejected.
+            if (app(ExamGradeIntegrationService::class)->isSynced($result)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Result is synchronized to an academic grade and cannot be deleted.',
+                    'data' => null,
+                ], 422);
+            }
+
+            $result->delete();
+
             return response()->json([
-                'success' => false,
-                'message' => 'Exam result not found',
+                'success' => true,
+                'message' => 'Exam result deleted successfully',
                 'data' => null,
-            ], 404);
-        }
-
-        // A finalized result is immutable and must never be deleted through the
-        // normal mutation path (no grade/assessment change, no deletion audit).
-        if ($result->is_final) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Result is finalized and cannot be deleted.',
-                'data' => null,
-            ], 422);
-        }
-
-        $result->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Exam result deleted successfully',
-            'data' => null,
-        ]);
+            ]);
+        });
     }
 
     /**
@@ -283,7 +336,13 @@ class ExamResultController extends Controller
      */
     public function finalize(Request $request, int $id): JsonResponse
     {
-        return DB::transaction(function () use ($request, $id) {
+        $auditContext = [
+            'user_id' => $request->user()?->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ];
+
+        return DB::transaction(function () use ($request, $id, $auditContext) {
             $result = ExamResult::where('id', $id)->lockForUpdate()->first();
 
             if (! $result) {
@@ -294,6 +353,14 @@ class ExamResultController extends Controller
                 ], 404);
             }
 
+            $scoring = app(ExamScoringService::class);
+            $integration = app(ExamGradeIntegrationService::class);
+
+            // B20-F2-F5: capture the effective result BEFORE the lock flips, so a
+            // finalization that changes what the academic grade must reflect can
+            // be propagated explicitly afterwards.
+            $effectiveBefore = $scoring->effectiveResult((int) $result->participant_id);
+
             $alreadyFinal = (bool) $result->is_final;
 
             if (! $alreadyFinal) {
@@ -302,8 +369,18 @@ class ExamResultController extends Controller
                 $result->save();
             }
 
+            // Finalized-first semantics mean this result is now the effective one
+            // for its participant. Only a finalization that actually CHANGED the
+            // effective result needs grade re-synchronization (and only when the
+            // Grade slot stays mutable — locked slots are never overwritten).
+            $effectiveChanged = $effectiveBefore === null || (int) $effectiveBefore->id !== (int) $result->id;
+            $gradeResync = 'none';
+            if ($effectiveChanged && ! $alreadyFinal) {
+                $gradeResync = $this->resyncGradeIfMutable($integration, $result, $auditContext);
+            }
+
             \App\Models\System\AuditLog::create([
-                'user_id' => $request->user()?->id,
+                'user_id' => $auditContext['user_id'],
                 'action' => 'exam_result_finalized',
                 'model' => ExamResult::class,
                 'model_id' => $result->id,
@@ -312,14 +389,16 @@ class ExamResultController extends Controller
                     'exam_attempt_id' => $result->exam_attempt_id,
                     'participant_id' => $result->participant_id,
                     'is_final' => true,
+                    'effective_changed' => $effectiveChanged,
+                    'grade_resync' => $gradeResync,
                     // Actor identity rides on the audit user_id; the schema has
                     // no finalized_by column to stamp, so it is quoted here too
                     // for bounded traceability.
-                    'finalized_by' => $request->user()?->id,
+                    'finalized_by' => $auditContext['user_id'],
                     'was_already_final' => $alreadyFinal,
                 ]),
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
+                'ip_address' => $auditContext['ip_address'],
+                'user_agent' => $auditContext['user_agent'],
             ]);
 
             return response()->json([
@@ -328,5 +407,42 @@ class ExamResultController extends Controller
                 'data' => new ExamResultResource($result->load(['participant', 'attempt'])),
             ]);
         });
+    }
+
+    /**
+     * B20-F2-F1/F5 shared resynchronization hook.
+     *
+     * Reuses ExamGradeIntegrationService::sync() verbatim — no grade-sync logic is
+     * duplicated here. Outcomes: 'done' (resynced + exam_grade_resynced audit),
+     * 'locked' (mutable guard refused, muted), 'ineligible' or 'absent' (no sync).
+     */
+    private function resyncGradeIfMutable(ExamGradeIntegrationService $integration, ExamResult $result, array $auditContext): string
+    {
+        try {
+            $outcome = $integration->sync($result, $auditContext);
+        } catch (HttpResponseException $e) {
+            return 'locked';
+        }
+
+        if (! ($outcome['ok'] ?? false)) {
+            return 'ineligible';
+        }
+
+        \App\Models\System\AuditLog::create([
+            'user_id' => $auditContext['user_id'] ?? null,
+            'action' => 'exam_grade_resynced',
+            'model' => ExamResult::class,
+            'model_id' => $result->id,
+            'description' => json_encode([
+                'result_id' => $result->id,
+                'exam_attempt_id' => $result->exam_attempt_id,
+                'grade_id' => $outcome['grade']->id ?? null,
+                'reason' => 'effective result resynchronization',
+            ]),
+            'ip_address' => $auditContext['ip_address'] ?? null,
+            'user_agent' => $auditContext['user_agent'] ?? null,
+        ]);
+
+        return 'done';
     }
 }

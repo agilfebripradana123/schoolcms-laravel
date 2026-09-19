@@ -188,6 +188,17 @@ class ExamCompositionFoundationTest extends TestCase
             $t->string('token', 64)->nullable();
             $t->timestamps();
         });
+        Schema::create('audit_logs', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedInteger('user_id')->nullable();
+            $t->string('action', 50);
+            $t->string('model', 100)->nullable();
+            $t->unsignedInteger('model_id')->nullable();
+            $t->text('description');
+            $t->string('ip_address', 45);
+            $t->string('user_agent', 255)->nullable();
+            $t->timestamp('created_at')->nullable();
+        });
     }
 
     private function seedFixture(): void

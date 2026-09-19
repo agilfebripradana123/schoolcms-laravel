@@ -735,4 +735,216 @@ class ExamResultFinalizationTest extends TestCase
         $this->assertNotNull(ExamResult::find($resultId));
         $this->assertSame(0, Grade::count());
     }
+
+    // -----------------------------------------------------------------
+    // B20-F2 Stage B — reconcile recompute / effective / finalize / sync
+    // -----------------------------------------------------------------
+
+    public function test_admin_recompute_after_sync_propagates_to_grade(): void
+    {
+        $attemptId = $this->startAsA($this->examEssay->id);
+        $aq = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->where('question_type', 'essay')->firstOrFail();
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$aq->id}", ['essay_answer' => 'jawaban'])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $answerId = ExamAnswer::where('exam_attempt_id', $attemptId)->value('id');
+        $resultId = ExamResult::where('exam_attempt_id', $attemptId)->value('id');
+
+        Sanctum::actingAs($this->teacherA);
+        $this->putJson("/api/teacher/exam-grading/answers/{$answerId}", ['score' => 16])->assertStatus(200);
+        $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(200);
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $this->assertSame(80.0, (float) $grade->score);
+
+        // Admin recompute of a synced, still-effective result must propagate.
+        Sanctum::actingAs($this->admin);
+        $this->putJson("/api/exam-results/{$resultId}", [])->assertStatus(200);
+
+        $grade->refresh();
+        $this->assertSame(80.0, (float) $grade->score, 'recompute must not leave the academic grade stale');
+        $this->assertSame(1, AuditLog::where('action', 'exam_grade_resynced')->where('model_id', $resultId)->count(), 'successful resync emits the bounded audit');
+        $this->assertSame(1, AuditLog::where('action', 'exam_result_recomputed')->where('model_id', $resultId)->count());
+        $this->assertSame(1, GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->count());
+        $this->assertTrue((bool) ExamResult::find($resultId)->is_final === false, 'recompute does not finalize');
+    }
+
+    public function test_recompute_synced_result_with_locked_grade_skips_resync(): void
+    {
+        $attemptId = $this->startAsA($this->examEssay->id);
+        $aq = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->where('question_type', 'essay')->firstOrFail();
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$aq->id}", ['essay_answer' => 'jawaban'])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $answerId = ExamAnswer::where('exam_attempt_id', $attemptId)->value('id');
+        $resultId = ExamResult::where('exam_attempt_id', $attemptId)->value('id');
+
+        Sanctum::actingAs($this->teacherA);
+        $this->putJson("/api/teacher/exam-grading/answers/{$answerId}", ['score' => 16])->assertStatus(200);
+        $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(200);
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $grade->forceFill(['is_final' => true])->save();
+
+        // Recompute still allowed; locked academic value is never overwritten.
+        Sanctum::actingAs($this->admin);
+        $this->putJson("/api/exam-results/{$resultId}", [])->assertStatus(200);
+
+        $grade->refresh();
+        $this->assertSame(80.0, (float) $grade->score, 'locked grade must keep its value');
+        $this->assertTrue((bool) $grade->is_final, 'locked grade flag untouched');
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_resynced')->where('model_id', $resultId)->count(), 'no resync on a locked slot');
+        $this->assertSame(1, AuditLog::where('action', 'exam_grade_resync_locked')->where('model_id', $resultId)->count(), 'locked skip is audited');
+    }
+
+    public function test_effective_attempt_change_marks_synced_result_stale(): void
+    {
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminSync($resultA)->assertStatus(200);
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $this->assertSame(100.0, (float) $grade->score);
+
+        // Attempt B becomes effective after submission; NO auto-sync moves the grade.
+        $attemptB = $this->startAsA($this->examMC->id);
+        $aqB = ExamAttemptQuestion::where('exam_attempt_id', $attemptB)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correctB = $aqB->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attemptB}/answers/{$aqB->id}", ['selected_option_id' => $correctB])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptB}/submit")->assertStatus(200);
+        $resultB = ExamResult::where('participant_id', $this->participantMC->id)->latest('id')->value('id');
+        $this->assertNotSame($resultA, $resultB);
+
+        Sanctum::actingAs($this->admin);
+        $resA = $this->getJson("/api/exam-results/{$resultA}")->assertStatus(200);
+        $this->assertFalse($resA->json('data.is_effective'), 'A is no longer effective');
+        $this->assertTrue($resA->json('data.grade_synced'), 'A still feeds the grade');
+        $this->assertTrue($resA->json('data.grade_stale'), 'A is a stale grade source');
+
+        $resB = $this->getJson("/api/exam-results/{$resultB}")->assertStatus(200);
+        $this->assertTrue($resB->json('data.is_effective'));
+        $this->assertFalse($resB->json('data.grade_synced'), 'B was never synced');
+        $this->assertFalse($resB->json('data.grade_stale'));
+
+        $this->assertSame(1, GradeAssessment::where('source_type', 'exam_result')->count(), 'no automatic grade movement');
+        $this->assertSame($resultA, GradeAssessment::where('source_type', 'exam_result')->value('source_id'));
+    }
+
+    public function test_finalize_already_effective_synced_result_leaves_grade_untouched(): void
+    {
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminSync($resultA)->assertStatus(200);
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+
+        $this->adminFinalize($resultA)->assertStatus(200);
+
+        $audit = AuditLog::where('action', 'exam_result_finalized')->where('model_id', $resultA)->latest('id')->firstOrFail();
+        $desc = json_decode($audit->description, true);
+        $this->assertFalse($desc['effective_changed'], 'finalizing the already-effective result changes nothing');
+        $this->assertSame('none', $desc['grade_resync']);
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_resynced')->count(), 'no resync when effective result is unchanged');
+
+        $grade->refresh();
+        $this->assertSame(100.0, (float) $grade->score);
+        $this->assertSame($resultA, GradeAssessment::whereNotNull('source_id')->value('source_id'));
+    }
+
+    public function test_finalize_non_effective_result_makes_it_effective_and_resyncs(): void
+    {
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminSync($resultA)->assertStatus(200);
+
+        // Attempt B is newer -> effective; grade still points at A (stale).
+        $attemptB = $this->startAsA($this->examMC->id);
+        $aqB = ExamAttemptQuestion::where('exam_attempt_id', $attemptB)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correctB = $aqB->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attemptB}/answers/{$aqB->id}", ['selected_option_id' => $correctB])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptB}/submit")->assertStatus(200);
+
+        // Finalizing the OLD result flips it to effective (finalized-first).
+        $this->adminFinalize($resultA)->assertStatus(200);
+
+        $audit = AuditLog::where('action', 'exam_result_finalized')->where('model_id', $resultA)->latest('id')->firstOrFail();
+        $desc = json_decode($audit->description, true);
+        $this->assertTrue($desc['effective_changed'], 'finalizing the older attempt changed the effective result');
+        $this->assertSame('done', $desc['grade_resync'], 'changed effective result is re-synchronized');
+
+        $this->assertSame(1, AuditLog::where('action', 'exam_grade_resynced')->where('model_id', $resultA)->count());
+        $this->assertSame($resultA, GradeAssessment::where('source_type', 'exam_result')->value('source_id'), 'grade now tracks the finalized effective result');
+        $this->assertSame(1, Grade::count());
+    }
+
+    public function test_finalize_with_locked_grade_slot_skips_resync(): void
+    {
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminSync($resultA)->assertStatus(200);
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $grade->forceFill(['is_final' => true])->save();
+
+        // Attempt B becomes effective; finalizing A would flip effective-ness,
+        // but the locked grade slot must NOT be overwritten.
+        $attemptB = $this->startAsA($this->examMC->id);
+        $aqB = ExamAttemptQuestion::where('exam_attempt_id', $attemptB)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correctB = $aqB->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attemptB}/answers/{$aqB->id}", ['selected_option_id' => $correctB])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptB}/submit")->assertStatus(200);
+
+        $this->adminFinalize($resultA)->assertStatus(200);
+
+        $audit = AuditLog::where('action', 'exam_result_finalized')->where('model_id', $resultA)->latest('id')->firstOrFail();
+        $desc = json_decode($audit->description, true);
+        $this->assertTrue($desc['effective_changed']);
+        $this->assertSame('locked', $desc['grade_resync'], 'locked slot is surfaced, never overwritten');
+
+        $grade->refresh();
+        $this->assertSame(100.0, (float) $grade->score, 'locked grade value untouched');
+        $this->assertTrue((bool) $grade->is_final);
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_resynced')->count(), 'no resync audit on locked slot');
+    }
+
+    public function test_delete_synced_result_rejected_keeps_provenance(): void
+    {
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminSync($resultId)->assertStatus(200);
+        $auditBefore = AuditLog::count();
+
+        Sanctum::actingAs($this->admin);
+        $res = $this->deleteJson("/api/exam-results/{$resultId}");
+        $res->assertStatus(422)->assertJsonPath('message', 'Result is synchronized to an academic grade and cannot be deleted.');
+
+        $this->assertNotNull(ExamResult::find($resultId), 'synced result must not be deleted');
+        $this->assertSame(1, Grade::count(), 'grade provenance remains intact');
+        $this->assertSame(1, GradeAssessment::where('source_type', 'exam_result')->count(), 'assessment provenance remains intact');
+        $this->assertSame($auditBefore, AuditLog::count(), 'rejected delete writes no audit');
+    }
+
+    public function test_delete_before_finalize_allowed_after_finalize_rejected(): void
+    {
+        // Unsynced, non-final result is still deletable.
+        $resultId = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-results/{$resultId}")->assertStatus(200);
+
+        // Same ordering with finalization: once finalized, the delete is blocked.
+        $resultF = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminFinalize($resultF)->assertStatus(200);
+        $this->deleteJson("/api/exam-results/{$resultF}")->assertStatus(422)->assertJsonPath('message', 'Result is finalized and cannot be deleted.');
+        $this->assertNotNull(ExamResult::find($resultF));
+    }
+
+    public function test_assessment_slot_survives_effective_result_switch_before_and_after(): void
+    {
+        // Initial sync creates exactly one assessment for the slot.
+        $resultA = $this->submitAnsweredMC($this->examMC->id, $this->participantMC->id, $this->qMC->id);
+        $this->adminSync($resultA)->assertStatus(200);
+        $this->assertSame(1, GradeAssessment::where('source_type', 'exam_result')->count());
+
+        // A later eligible effective result updates the SAME slot (B20-F2-F9).
+        $attemptB = $this->startAsA($this->examMC->id);
+        $aqB = ExamAttemptQuestion::where('exam_attempt_id', $attemptB)->where('source_question_id', $this->qMC->id)->with('options')->firstOrFail();
+        $correctB = $aqB->options->firstWhere('is_correct', true)->id;
+        $this->putJson("/api/student/exam-attempts/{$attemptB}/answers/{$aqB->id}", ['selected_option_id' => $correctB])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptB}/submit")->assertStatus(200);
+        $resultB = ExamResult::where('participant_id', $this->participantMC->id)->latest('id')->value('id');
+
+        $this->adminSync($resultB)->assertStatus(200);
+
+        $this->assertSame(1, GradeAssessment::count(), 'one assessment per (student, subject, class, period, category, sequence)');
+        $this->assertSame($resultB, GradeAssessment::first()->source_id, 'later effective result replaces the source');
+        $this->assertSame(1, Grade::count(), 'one academic grade per slot');
+    }
 }

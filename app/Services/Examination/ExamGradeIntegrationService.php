@@ -10,6 +10,7 @@ use App\Models\Examination\ExamResult;
 use App\Models\System\AuditLog;
 use App\Services\Academic\GradeMutationGuard;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * ExamResult -> Academic Grade integration (Phase 2I).
@@ -31,6 +32,13 @@ use Illuminate\Support\Facades\DB;
  * `uniq_grades_period`. Sync is therefore idempotent — repeated sync and any
  * later eligible result for the same slot reconcile the SAME row (re-sync
  * policy = "grade updates automatically, never silently stale").
+ *
+ * Assessment uniqueness (Phase 2K): ONE `grade_assessments` row per
+ * (student, subject, class, academic_year_id, semester_id, assessment_category,
+ * assessment_sequence) via `uq_grade_assessments_cat_seq`. A later eligible
+ * sync for the same slot UPDATES that row (score + source_id), it never creates
+ * a second one — so a re-sync or an effective-attempt change replaces the
+ * source rather than accumulating duplicate assessments.
  *
  * `source_type = exam_result` + `source_id` give traceability and back the
  * `uniq_grades_source` uniqueness, so one result can never produce two rows.
@@ -89,6 +97,9 @@ class ExamGradeIntegrationService
         if ($classId < 1) {
             return $this->notEligible('Student has no assigned class.');
         }
+        // Classless exams (school-wide UTS/UAS, exam.class_id NULL) are a deliberate
+        // domain capability: the grade slot is the student's home class. Mismatch
+        // validation applies only when the exam DOES carry an explicit class.
         if ($exam->class_id !== null && (int) $exam->class_id !== $classId) {
             return $this->notEligible('Exam class does not match the student home class.');
         }
@@ -105,16 +116,28 @@ class ExamGradeIntegrationService
         // Phase 2J + 2L-7F: never overwrite or create an academic Grade in a
         // finalized (or published-report-card locked) slot, even when the
         // bucket Grade row does not exist yet.
-        app(GradeMutationGuard::class)->assertSlotMutable(
-            $student->id,
-            $subject->id,
-            $classId,
-            $exam->academic_year_id,
-            $exam->semester_id,
-            $type,
-        );
-
+        //
+        // B20-F2-F6: the mutability decision and the write now share ONE
+        // transaction, and the target Grade row is locked before the guard and
+        // the write — a concurrent grade finalization cannot slip between the
+        // mutability check and the updateOrCreate (TOCTOU).
         $grade = DB::transaction(function () use ($result, $student, $subject, $classId, $type, $exam, $score, $auditContext) {
+            $guard = app(GradeMutationGuard::class);
+
+            $lockedGrade = Grade::where('student_id', $student->id)
+                ->where('subject_id', $subject->id)
+                ->where('class_id', $classId)
+                ->where('type', $type)
+                ->where('semester_id', $exam->semester_id)
+                ->where('academic_year_id', $exam->academic_year_id)
+                ->lockForUpdate()
+                ->first();
+
+            $guard->assertMutable(
+                $lockedGrade
+                    ?? $guard->slotShell($student->id, $classId, $exam->academic_year_id, $exam->semester_id)
+            );
+
             $grade = Grade::updateOrCreate(
                 [
                     'student_id' => $student->id,
@@ -188,9 +211,16 @@ class ExamGradeIntegrationService
     /**
      * True when an assessment already traces back to this result (used to
      * propagate regrades automatically so academic data can never go stale).
+     *
+     * Null-safe against installs/previews without the phase-2K table: a missing
+     * `grade_assessments` table can never be "synced".
      */
     public function isSynced(ExamResult $result): bool
     {
+        if (! Schema::hasTable('grade_assessments')) {
+            return false;
+        }
+
         return GradeAssessment::where('source_type', 'exam_result')
             ->where('source_id', $result->id)
             ->exists();

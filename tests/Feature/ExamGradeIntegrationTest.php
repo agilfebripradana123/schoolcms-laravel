@@ -769,4 +769,75 @@ class ExamGradeIntegrationTest extends TestCase
         $this->adminSync($resultId)->assertStatus(200);
         $this->assertSame(0.0, (float) Grade::first()->score, 'a legitimately graded 0% is a valid academic value');
     }
+
+    // -----------------------------------------------------------------
+    // B20-F2 Stage B — locked-slot atomicity + classless-exam mapping
+    // -----------------------------------------------------------------
+
+    public function test_sync_locked_slot_writes_no_partial_assessment(): void
+    {
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $resultId = ExamResult::where('participant_id', $this->participantMC->id)->value('id');
+
+        $this->adminSync($resultId)->assertStatus(200);
+        $grade = Grade::where('type', 'uts')->firstOrFail();
+        $this->assertSame(100.0, (float) $grade->score);
+        $grade->forceFill(['is_final' => true])->save();
+
+        // With the slot locked, sync refuses atomically: no grade overwrite, no
+        // new assessment row, no new audit (B20-F2-F6).
+        $assessmentsBefore = GradeAssessment::count();
+        $auditBefore = AuditLog::count();
+
+        $this->adminSync($resultId)->assertStatus(422);
+
+        $grade->refresh();
+        $this->assertSame(100.0, (float) $grade->score, 'locked slot value untouched');
+        $this->assertTrue((bool) $grade->is_final);
+        $this->assertSame($assessmentsBefore, GradeAssessment::count(), 'no partial assessment row');
+        $this->assertSame($auditBefore, AuditLog::count(), 'rejected sync writes no audit');
+    }
+
+    public function test_sync_classless_exam_derives_student_home_class(): void
+    {
+        // Classless UTS/UAS is a deliberate domain capability: grade slot resolves
+        // to the student's home class. (B20-F3 will revisit class-drift.)
+        $mtkId = QuestionBank::find($this->qMC->id)->subject_id;
+        $noClassExam = \App\Models\Examination\Exam::create([
+            'subject_id' => $mtkId,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'exam_type' => 'uts',
+            'class_id' => null,
+            'title' => 'UTH lintas kelas',
+            'duration_minutes' => 30,
+            'status' => 'published',
+        ]);
+        \App\Models\Examination\ExamQuestion::create(['exam_id' => $noClassExam->id, 'question_id' => $this->qMC->id, 'position' => 1, 'points' => 10]);
+        $participant = \App\Models\Examination\ExamParticipant::create([
+            'exam_id' => $noClassExam->id,
+            'student_id' => $this->studentA->id,
+            'exam_card_number' => 'CARD-NOCLS',
+            'status' => 'registered',
+            'login_allowed' => true,
+        ]);
+
+        $attemptId = $this->startAsA($noClassExam->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $resultId = ExamResult::where('participant_id', $participant->id)->value('id');
+
+        $res = $this->adminSync($resultId);
+        $res->assertStatus(200);
+
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $this->assertSame($this->class1->id, (int) $grade->class_id, 'student home class is derived for a classless exam');
+        $this->assertSame(100.0, (float) $grade->score);
+        $this->assertSame(1, GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->count());
+        $this->assertSame(1, AuditLog::where('action', 'exam_grade_synced')->where('model_id', $resultId)->count());
+    }
 }

@@ -9,6 +9,16 @@ class ExamResultResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // B20-F2-F2: read-only, derived grade-sync signals. A result is stale
+        // when it still feeds an academic grade but is no longer the effective
+        // result (a newer submitted attempt, or a competing finalization, won).
+        // The effective result itself reports grade_synced=false until it is
+        // (re)synchronized. Nothing here mutates data.
+        $scoring = app(\App\Services\Examination\ExamScoringService::class);
+        $integration = app(\App\Services\Examination\ExamGradeIntegrationService::class);
+        $isEffective = $scoring->isEffectiveResult($this->resource);
+        $isSynced = $integration->isSynced($this->resource);
+
         return [
             'id' => $this->id,
             'participant_id' => $this->participant_id,
@@ -23,6 +33,9 @@ class ExamResultResource extends JsonResource
             'status' => $this->status,
             'is_final' => (bool) $this->is_final,
             'finalized_at' => $this->finalized_at?->toISOString(),
+            'is_effective' => $isEffective,
+            'grade_synced' => $isSynced,
+            'grade_stale' => $isSynced && ! $isEffective,
             'graded_at' => $this->graded_at?->toISOString(),
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
