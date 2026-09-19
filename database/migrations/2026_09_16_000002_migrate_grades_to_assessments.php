@@ -44,12 +44,28 @@ class MigrateGradesToAssessments extends Migration
                 continue; // Skip already-migrated row
             }
 
+            // Resolve academic_year_id from string
+            $academicYearId = DB::table('academic_years')
+                ->where('name', $grade->academic_year)
+                ->value('id');
+
+            // Resolve semester_id from string + academic_year_id
+            $semesterId = DB::table('semesters')
+                ->where('name', $grade->semester)
+                ->where('academic_year_id', $academicYearId)
+                ->value('id');
+
+            // Skip if cannot resolve period IDs
+            if (!$academicYearId || !$semesterId) {
+                continue;
+            }
+
             DB::table('grade_assessments')->insert([
                 'student_id' => $grade->student_id,
                 'subject_id' => $grade->subject_id,
                 'class_id' => $grade->class_id,
-                'academic_year_id' => null, // will be resolved later
-                'semester_id' => null,      // will be resolved later
+                'academic_year_id' => $academicYearId,
+                'semester_id' => $semesterId,
                 'assessment_category' => $grade->type,
                 'assessment_sequence' => 1,
                 'score' => $grade->score,
