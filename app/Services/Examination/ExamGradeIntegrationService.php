@@ -7,6 +7,7 @@ use App\Models\Academic\Grade;
 use App\Models\Academic\GradeAssessment;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamResult;
+use App\Models\System\AuditLog;
 use App\Services\Academic\GradeMutationGuard;
 use Illuminate\Support\Facades\DB;
 
@@ -39,9 +40,10 @@ class ExamGradeIntegrationService
     private const SYNCABLE_EXAM_TYPES = ['uts', 'uas'];
 
     /**
+     * @param  array{user_id?: int|null, ip_address?: string|null, user_agent?: string|null}  $auditContext
      * @return array{ok: bool, message: string, grade?: Grade}
      */
-    public function sync(ExamResult $result): array
+    public function sync(ExamResult $result, ?array $auditContext = null): array
     {
         if ($result->exam_attempt_id === null) {
             return $this->notEligible('Legacy result without an attempt cannot be mapped to an academic period.');
@@ -112,7 +114,7 @@ class ExamGradeIntegrationService
             $type,
         );
 
-        $grade = DB::transaction(function () use ($result, $student, $subject, $classId, $type, $exam, $score) {
+        $grade = DB::transaction(function () use ($result, $student, $subject, $classId, $type, $exam, $score, $auditContext) {
             $grade = Grade::updateOrCreate(
                 [
                     'student_id' => $student->id,
@@ -152,6 +154,30 @@ class ExamGradeIntegrationService
                     'notes' => 'Synced from ExamResult#'.$result->id,
                 ]
             );
+
+            // Audit inside the same transaction: success persists, rollback
+            // removes it together with Grade + GradeAssessment mutation. Actor
+            // comes from the caller context; internal/automatic re-syncs with
+            // no actor keep user_id null rather than claiming a wrong user.
+            AuditLog::create([
+                'user_id' => $auditContext['user_id'] ?? null,
+                'action' => 'exam_grade_synced',
+                'model' => ExamResult::class,
+                'model_id' => $result->id,
+                'description' => json_encode([
+                    'result_id' => $result->id,
+                    'grade_id' => $grade->id,
+                    'student_id' => $student->id,
+                    'subject_id' => $subject->id,
+                    'class_id' => $classId,
+                    'semester_id' => $exam->semester_id,
+                    'academic_year_id' => $exam->academic_year_id,
+                    'type' => $type,
+                    'percentage' => (float) $score,
+                ]),
+                'ip_address' => $auditContext['ip_address'] ?? null,
+                'user_agent' => $auditContext['user_agent'] ?? null,
+            ]);
 
             return $grade;
         });

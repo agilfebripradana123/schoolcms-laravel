@@ -105,6 +105,17 @@ class ExamController extends Controller
 
         $validated = $request->validated();
 
+        // Capture pre-update state for a bounded audit diff.
+        $tracked = [
+            'title', 'subject_id', 'description', 'duration_minutes', 'total_questions',
+            'passing_score', 'max_attempts', 'shuffle_questions', 'shuffle_options',
+            'show_result', 'status', 'class_id', 'academic_year_id', 'semester_id', 'exam_type',
+        ];
+        $before = [];
+        foreach ($tracked as $key) {
+            $before[$key] = $exam->getAttribute($key);
+        }
+
         if (array_key_exists('status', $validated) && $validated['status'] !== $exam->status) {
             $target = $validated['status'];
 
@@ -123,6 +134,31 @@ class ExamController extends Controller
         }
 
         $exam->update($validated);
+
+        // Audit meaningful persisted changes only (bounded payload; no answer
+        // keys, no option content, no PII).
+        $changed = [];
+        foreach ($tracked as $key) {
+            if ($before[$key] != $exam->getAttribute($key)) {
+                $changed[] = $key;
+            }
+        }
+
+        if (! empty($changed)) {
+            \App\Models\System\AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_updated',
+                'model' => Exam::class,
+                'model_id' => $exam->id,
+                'description' => json_encode(array_filter([
+                    'status_before' => $before['status'],
+                    'status_after' => $exam->status,
+                    'changed_fields' => $changed,
+                ])),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        }
 
         return response()->json([
             'success' => true,

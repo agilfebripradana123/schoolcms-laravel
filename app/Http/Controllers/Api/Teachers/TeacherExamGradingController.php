@@ -126,55 +126,84 @@ class TeacherExamGradingController extends Controller
             return $this->unprocessable(sprintf('Score must be between 0 and %d.', $maxPoints));
         }
 
-        $answer->score = $score;
-        if ($request->filled('feedback')) {
-            $answer->feedback = $request->input('feedback');
-        }
-        $answer->grade_status = 'manually_graded';
-        $answer->graded_by = $request->user()->id;
-        $answer->graded_at = now();
-        $answer->save();
+        // Answer mutation + result recomputation (+ optional re-sync) + audit
+        // share a single transaction so a failed operation leaves nothing behind.
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $answer, $attempt, $question, $score) {
+            $scoreBefore = $answer->score;
 
-        // Recompute the participant result from the snapshot (idempotent).
-        $result = app(ExamScoringService::class)->scoreAttempt($attempt);
-
-        // Regrade propagation: if this result was already synchronized into the
-        // academic Grade, re-sync so the academic value never goes stale —
-        // UNLESS the grade is finalized/locked (Grade.is_final stays the
-        // authoritative lock; a locked academic value is never overwritten).
-        $resultRow = \App\Models\Examination\ExamResult::where('exam_attempt_id', $attempt->id)->first();
-        $gradeIntegration = app(ExamGradeIntegrationService::class);
-        if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
-            // Source tracing lives on GradeAssessment; resolve the matching
-            // academic Grade via the assessment identity.
-            $assessment = \App\Models\Academic\GradeAssessment::where('source_type', 'exam_result')
-                ->where('source_id', $resultRow->id)
-                ->first();
-            $syncedGrade = $assessment ? \App\Models\Academic\Grade::where('student_id', $assessment->student_id)
-                ->where('subject_id', $assessment->subject_id)
-                ->where('class_id', $assessment->class_id)
-                ->where('type', $assessment->assessment_category)
-                ->where('semester_id', $assessment->semester_id)
-                ->where('academic_year_id', $assessment->academic_year_id)
-                ->first() : null;
-            if ($syncedGrade && ! app(\App\Services\Academic\GradeMutationGuard::class)->isLocked($syncedGrade)) {
-                $gradeIntegration->sync($resultRow);
+            $answer->score = $score;
+            if ($request->filled('feedback')) {
+                $answer->feedback = $request->input('feedback');
             }
-        }
+            $answer->grade_status = 'manually_graded';
+            $answer->graded_by = $request->user()->id;
+            $answer->graded_at = now();
+            $answer->save();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Essay answer graded successfully',
-            'data' => [
-                'attempt_question_id' => $question->id,
-                'score' => $score,
-                'feedback' => $answer->feedback,
-                'grade_status' => $answer->grade_status,
-                'graded_by' => $answer->graded_by,
-                'graded_at' => $answer->graded_at?->toISOString(),
-                'result' => $result,
-            ],
-        ]);
+            // Recompute the participant result from the snapshot (idempotent).
+            $result = app(ExamScoringService::class)->scoreAttempt($attempt);
+
+            $auditContext = [
+                'user_id' => $request->user()?->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ];
+
+            // Regrade propagation: if this result was already synchronized into the
+            // academic Grade, re-sync so the academic value never goes stale —
+            // UNLESS the grade is finalized/locked (Grade.is_final stays the
+            // authoritative lock; a locked academic value is never overwritten).
+            $resultRow = \App\Models\Examination\ExamResult::where('exam_attempt_id', $attempt->id)->first();
+            $gradeIntegration = app(ExamGradeIntegrationService::class);
+            if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
+                // Source tracing lives on GradeAssessment; resolve the matching
+                // academic Grade via the assessment identity.
+                $assessment = \App\Models\Academic\GradeAssessment::where('source_type', 'exam_result')
+                    ->where('source_id', $resultRow->id)
+                    ->first();
+                $syncedGrade = $assessment ? \App\Models\Academic\Grade::where('student_id', $assessment->student_id)
+                    ->where('subject_id', $assessment->subject_id)
+                    ->where('class_id', $assessment->class_id)
+                    ->where('type', $assessment->assessment_category)
+                    ->where('semester_id', $assessment->semester_id)
+                    ->where('academic_year_id', $assessment->academic_year_id)
+                    ->first() : null;
+                if ($syncedGrade && ! app(\App\Services\Academic\GradeMutationGuard::class)->isLocked($syncedGrade)) {
+                    $gradeIntegration->sync($resultRow, $auditContext);
+                }
+            }
+
+            \App\Models\System\AuditLog::create([
+                'user_id' => $auditContext['user_id'],
+                'action' => 'exam_essay_graded',
+                'model' => ExamAnswer::class,
+                'model_id' => $answer->id,
+                'description' => json_encode([
+                    'answer_id' => $answer->id,
+                    'attempt_id' => $attempt->id,
+                    'exam_id' => $attempt->exam_id,
+                    'score_before' => $scoreBefore,
+                    'score_after' => $score,
+                    'feedback_present' => $request->filled('feedback'),
+                ]),
+                'ip_address' => $auditContext['ip_address'],
+                'user_agent' => $auditContext['user_agent'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Essay answer graded successfully',
+                'data' => [
+                    'attempt_question_id' => $question->id,
+                    'score' => $score,
+                    'feedback' => $answer->feedback,
+                    'grade_status' => $answer->grade_status,
+                    'graded_by' => $answer->graded_by,
+                    'graded_at' => $answer->graded_at?->toISOString(),
+                    'result' => $result,
+                ],
+            ]);
+        });
     }
 
     /**
@@ -207,7 +236,11 @@ class TeacherExamGradingController extends Controller
             return $this->unprocessable('Exam result is not eligible for synchronization.');
         }
 
-        $outcome = app(ExamGradeIntegrationService::class)->sync($resultRow);
+        $outcome = app(ExamGradeIntegrationService::class)->sync($resultRow, [
+            'user_id' => $request->user()?->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
 
         if (! $outcome['ok']) {
             return $this->unprocessable($outcome['message']);

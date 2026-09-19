@@ -8,6 +8,7 @@ use App\Http\Requests\Api\Examination\UpdateExamParticipantRequest;
 use App\Http\Resources\Examination\ExamParticipantResource;
 use App\Models\Examination\ExamParticipant;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class ExamParticipantController extends Controller
@@ -67,6 +68,22 @@ class ExamParticipantController extends Controller
         $participant = ExamParticipant::create($request->validated());
         $participant->load(['exam', 'student']);
 
+        \App\Models\System\AuditLog::create([
+            'user_id' => $request->user()?->id,
+            'action' => 'exam_participant_created',
+            'model' => ExamParticipant::class,
+            'model_id' => $participant->id,
+            'description' => json_encode([
+                'participant_id' => $participant->id,
+                'exam_id' => $participant->exam_id,
+                'student_id' => $participant->student_id,
+                'schedule_id' => $participant->schedule_id,
+                'exam_card_number' => $participant->exam_card_number,
+            ]),
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Exam participant created successfully',
@@ -86,8 +103,43 @@ class ExamParticipantController extends Controller
             ], 404);
         }
 
+        $before = [
+            'status' => $participant->status,
+            'schedule_id' => $participant->schedule_id,
+            'exam_card_number' => $participant->exam_card_number,
+            'login_allowed' => $participant->login_allowed,
+            'is_blocked' => $participant->is_blocked,
+        ];
+
         $participant->update($request->validated());
         $participant->load(['exam', 'student']);
+
+        $changes = [];
+        foreach ($before as $key => $oldValue) {
+            if ($oldValue != $participant->getAttribute($key)) {
+                $changes[] = [
+                    'field' => $key,
+                    'before' => $oldValue,
+                    'after' => $participant->getAttribute($key),
+                ];
+            }
+        }
+
+        if (! empty($changes)) {
+            \App\Models\System\AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_participant_updated',
+                'model' => ExamParticipant::class,
+                'model_id' => $participant->id,
+                'description' => json_encode([
+                    'participant_id' => $participant->id,
+                    'exam_id' => $participant->exam_id,
+                    'changes' => $changes,
+                ]),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        }
 
         return response()->json([
             'success' => true,
@@ -96,9 +148,9 @@ class ExamParticipantController extends Controller
         ]);
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
-        return DB::transaction(function () use ($id) {
+        return DB::transaction(function () use ($request, $id) {
             $participant = ExamParticipant::where('id', $id)->lockForUpdate()->first();
 
             if (!$participant) {
@@ -120,7 +172,24 @@ class ExamParticipantController extends Controller
                 ], 422);
             }
 
+            $participantSnapshot = [
+                'participant_id' => $participant->id,
+                'exam_id' => $participant->exam_id,
+                'student_id' => $participant->student_id,
+            ];
+
             $participant->delete();
+
+            // Captured before deletion because the target row no longer exists.
+            \App\Models\System\AuditLog::create([
+                'user_id' => $request->user()?->id,
+                'action' => 'exam_participant_deleted',
+                'model' => ExamParticipant::class,
+                'model_id' => $id,
+                'description' => json_encode($participantSnapshot),
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
 
             return response()->json([
                 'success' => true,

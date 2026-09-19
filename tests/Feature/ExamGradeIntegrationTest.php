@@ -21,6 +21,7 @@ use App\Models\Examination\QuestionOption;
 use App\Models\Staff\Teacher;
 use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Student;
+use App\Models\System\AuditLog;
 use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -45,6 +46,18 @@ class ExamGradeIntegrationTest extends TestCase
 
     private function buildSchema(): void
     {
+        Schema::create('audit_logs', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedInteger('user_id')->nullable();
+            $t->string('action', 50);
+            $t->string('model', 100)->nullable();
+            $t->unsignedInteger('model_id')->nullable();
+            $t->text('description');
+            $t->string('ip_address', 45);
+            $t->string('user_agent', 255)->nullable();
+            $t->timestamp('created_at')->nullable();
+        });
+
         Schema::create('roles', function (Blueprint $t) {
             $t->id();
             $t->string('name');
@@ -707,6 +720,35 @@ class ExamGradeIntegrationTest extends TestCase
         Sanctum::actingAs($this->teacherA);
         $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(200);
         $this->assertSame(1, Grade::count());
+    }
+
+    public function test_exam_grade_sync_writes_audit(): void
+    {
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit");
+        $resultId = ExamResult::where('participant_id', $this->participantMC->id)->value('id');
+
+        Sanctum::actingAs($this->teacherA);
+        $res = $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync");
+        $res->assertStatus(200);
+        $gradeId = $res->json('data.grade_id');
+
+        $audit = AuditLog::where('action', 'exam_grade_synced')->where('model_id', $resultId)->firstOrFail();
+        $this->assertSame($this->teacherA->id, $audit->user_id, 'actor is the syncing teacher');
+        $desc = json_decode($audit->description, true);
+        $this->assertSame($resultId, $desc['result_id']);
+        $this->assertSame($gradeId, $desc['grade_id']);
+    }
+
+    public function test_rejected_grade_sync_creates_no_audit(): void
+    {
+        $result = ExamResult::create(['participant_id' => $this->participantMC->id, 'total_score' => 50, 'percentage' => 50, 'status' => 'graded']);
+        $this->adminSync($result->id)->assertStatus(422);
+
+        $this->assertSame(0, Grade::count());
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_synced')->count(), 'rejected sync must not leave an audit event');
     }
 
     // -----------------------------------------------------------------
