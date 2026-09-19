@@ -21,6 +21,7 @@ use App\Models\Examination\QuestionOption;
 use App\Models\Staff\Teacher;
 use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Student;
+use App\Models\Students\StudentHistory;
 use App\Models\System\AuditLog;
 use App\Models\System\Role;
 use App\Models\System\User;
@@ -333,6 +334,19 @@ class ExamGradeIntegrationTest extends TestCase
                 ['student_id', 'subject_id', 'class_id', 'academic_year_id', 'semester_id', 'assessment_category', 'assessment_sequence'],
                 'uq_grade_assessments_cat_seq'
             );
+        });
+        Schema::create('student_histories', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
+            $t->string('status')->default('naik');
+            $t->text('notes')->nullable();
+            $t->boolean('is_final')->default(false);
+            $t->dateTime('finalized_at')->nullable();
+            $t->unsignedBigInteger('finalized_by')->nullable();
+            $t->timestamps();
+            $t->unique(['student_id', 'academic_year_id'], 'uniq_student_histories');
         });
         Schema::create('report_cards', function (Blueprint $t) {
             $t->id();
@@ -801,43 +815,128 @@ class ExamGradeIntegrationTest extends TestCase
         $this->assertSame($auditBefore, AuditLog::count(), 'rejected sync writes no audit');
     }
 
-    public function test_sync_classless_exam_derives_student_home_class(): void
+    private function classlessExamResult(int $academicYearId, int $semesterId): int
     {
-        // Classless UTS/UAS is a deliberate domain capability: grade slot resolves
-        // to the student's home class. (B20-F3 will revisit class-drift.)
         $mtkId = QuestionBank::find($this->qMC->id)->subject_id;
-        $noClassExam = \App\Models\Examination\Exam::create([
+        $exam = \App\Models\Examination\Exam::create([
             'subject_id' => $mtkId,
-            'academic_year_id' => $this->ay->id,
-            'semester_id' => $this->semester->id,
+            'academic_year_id' => $academicYearId,
+            'semester_id' => $semesterId,
             'exam_type' => 'uts',
             'class_id' => null,
             'title' => 'UTH lintas kelas',
             'duration_minutes' => 30,
             'status' => 'published',
         ]);
-        \App\Models\Examination\ExamQuestion::create(['exam_id' => $noClassExam->id, 'question_id' => $this->qMC->id, 'position' => 1, 'points' => 10]);
+        \App\Models\Examination\ExamQuestion::create(['exam_id' => $exam->id, 'question_id' => $this->qMC->id, 'position' => 1, 'points' => 10]);
         $participant = \App\Models\Examination\ExamParticipant::create([
-            'exam_id' => $noClassExam->id,
+            'exam_id' => $exam->id,
             'student_id' => $this->studentA->id,
             'exam_card_number' => 'CARD-NOCLS',
             'status' => 'registered',
             'login_allowed' => true,
         ]);
 
-        $attemptId = $this->startAsA($noClassExam->id);
+        $attemptId = $this->startAsA($exam->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        return ExamResult::where('participant_id', $participant->id)->value('id');
+    }
+
+    public function test_sync_classless_exam_uses_historical_academic_year_class(): void
+    {
+        // Classless UTS/UAS resolves the grade slot from the student's academic-
+        // year class history, not from the current home class.
+        StudentHistory::create(['student_id' => $this->studentA->id, 'class_id' => $this->class1->id, 'academic_year_id' => $this->ay->id, 'status' => 'naik']);
+        $resultId = $this->classlessExamResult($this->ay->id, $this->semester->id);
+
+        $this->adminSync($resultId)->assertStatus(200);
+
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $this->assertSame($this->class1->id, (int) $grade->class_id, 'historical academic-year class is used');
+        $this->assertSame(100.0, (float) $grade->score);
+        $assessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->firstOrFail();
+        $this->assertSame($this->class1->id, (int) $assessment->class_id);
+        $this->assertSame($resultId, (int) $assessment->source_id);
+    }
+
+    public function test_sync_classless_exam_uses_historical_class_not_current_home_class(): void
+    {
+        // Primary class-drift regression: the student currently sits in class1
+        // but was in class2 during the exam's academic year — the grade must go
+        // to class2 and never to the current home class.
+        $mtkId = QuestionBank::find($this->qMC->id)->subject_id;
+        $class2 = SchoolClass::create(['name' => '8A', 'level' => '8']);
+        ClassSubject::create(['class_id' => $class2->id, 'subject_id' => $mtkId, 'academic_year_id' => $this->ay->id]);
+        StudentHistory::create(['student_id' => $this->studentA->id, 'class_id' => $class2->id, 'academic_year_id' => $this->ay->id, 'status' => 'naik']);
+        $this->assertNotSame($this->class1->id, (int) $class2->id);
+
+        $resultId = $this->classlessExamResult($this->ay->id, $this->semester->id);
+        $this->adminSync($resultId)->assertStatus(200);
+
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $this->assertSame($class2->id, (int) $grade->class_id, 'target is the historical academic-year class');
+        $this->assertNotSame((int) $this->studentA->class_id, (int) $grade->class_id, 'current students.class_id must never be the fallback');
+        $assessment = GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->firstOrFail();
+        $this->assertSame($class2->id, (int) $assessment->class_id);
+        $this->assertSame(0, Grade::where('class_id', $this->class1->id)->where('type', 'uts')->count(), 'no grade leaked into the current class');
+    }
+
+    public function test_sync_classless_exam_rejected_when_no_class_history(): void
+    {
+        // A classless exam whose academic year has no student class history is
+        // rejected outright — nothing is guessed, nothing is written.
+        $ay2 = AcademicYear::create(['name' => '2026/2027', 'is_active' => false]);
+        $sem2 = Semester::create(['academic_year_id' => $ay2->id, 'name' => '1', 'is_active' => false]);
+        $resultId = $this->classlessExamResult($ay2->id, $sem2->id);
+
+        $this->assertSame(0, StudentHistory::where('student_id', $this->studentA->id)->where('academic_year_id', $ay2->id)->count());
+
+        $res = $this->adminSync($resultId);
+        $res->assertStatus(422)->assertJsonPath('message', 'Student has no class history for the exam academic year.');
+
+        $this->assertSame(0, Grade::count(), 'no grade is written without a resolvable history');
+        $this->assertSame(0, GradeAssessment::count(), 'no assessment is written without a resolvable history');
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_synced')->count());
+    }
+
+    public function test_sync_explicit_class_exam_mismatch_rejected(): void
+    {
+        // Explicit-class exams keep the existing mismatch validation: a grade can
+        // never land in an exam class that differs from the student's class.
+        $mtkId = QuestionBank::find($this->qMC->id)->subject_id;
+        $class2 = SchoolClass::create(['name' => '8A', 'level' => '8']);
+        $mismatchExam = \App\Models\Examination\Exam::create([
+            'subject_id' => $mtkId,
+            'class_id' => $class2->id,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'exam_type' => 'uts',
+            'title' => 'UTH mismatch',
+            'duration_minutes' => 30,
+            'status' => 'published',
+        ]);
+        \App\Models\Examination\ExamQuestion::create(['exam_id' => $mismatchExam->id, 'question_id' => $this->qMC->id, 'position' => 1, 'points' => 10]);
+        $participant = \App\Models\Examination\ExamParticipant::create([
+            'exam_id' => $mismatchExam->id,
+            'student_id' => $this->studentA->id,
+            'exam_card_number' => 'CARD-MM',
+            'status' => 'registered',
+            'login_allowed' => true,
+        ]);
+
+        $attemptId = $this->startAsA($mismatchExam->id);
         $ref = $this->correctOption($attemptId, $this->qMC->id);
         $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
         $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
         $resultId = ExamResult::where('participant_id', $participant->id)->value('id');
 
         $res = $this->adminSync($resultId);
-        $res->assertStatus(200);
+        $res->assertStatus(422)->assertJsonPath('message', 'Exam class does not match the student home class.');
 
-        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
-        $this->assertSame($this->class1->id, (int) $grade->class_id, 'student home class is derived for a classless exam');
-        $this->assertSame(100.0, (float) $grade->score);
-        $this->assertSame(1, GradeAssessment::where('source_type', 'exam_result')->where('source_id', $resultId)->count());
-        $this->assertSame(1, AuditLog::where('action', 'exam_grade_synced')->where('model_id', $resultId)->count());
+        $this->assertSame(0, Grade::count());
+        $this->assertSame(0, GradeAssessment::count());
     }
 }

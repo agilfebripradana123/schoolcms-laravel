@@ -7,6 +7,7 @@ use App\Models\Academic\Grade;
 use App\Models\Academic\GradeAssessment;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamResult;
+use App\Models\Students\StudentHistory;
 use App\Models\System\AuditLog;
 use App\Services\Academic\GradeMutationGuard;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,9 @@ use Illuminate\Support\Facades\Schema;
  *   - attempt exam maps to a subject; student has a home class
  *   - exam academic context (academic_year_id + semester_id) is present —
  *     NEVER resolved from exam date, schedule session, or client input
+ *   - class context: explicit-class exams use exam.class_id (mismatch rejected);
+ *     classless exams use the student's academic-year class history
+ *     (`student_histories`) — current students.class_id is never a fallback
  *   - exam.exam_type maps to an existing grade.type (uts/uas only; the repo has
  *     no assessment-type model for formatif/sumatif/ujian_sekolah/remedial)
  *   - the subject is legitimately assigned to the class (ClassSubject), same
@@ -93,15 +97,39 @@ class ExamGradeIntegrationService
             return $this->notEligible('Subject or student could not be resolved.');
         }
 
-        $classId = (int) $student->class_id;
+        // B20-F3: class context resolution.
+        //
+        // Explicit-class exams keep the historical behavior: the grade slot is
+        // the exam's own class and must match the student's home class.
+        //
+        // Classless exams (school-wide UTS/UAS, exam.class_id NULL) resolve the
+        // grade slot from the student's academic-year class membership
+        // (`student_histories`, one authoritative row per student+academic year).
+        // Current `students.class_id` is NEVER used as a fallback, and a missing
+        // history row rejects the sync instead of guessing.
+        $classId = null;
+
+        if ($exam->class_id !== null) {
+            $classId = (int) $exam->class_id;
+
+            if ((int) $student->class_id !== $classId) {
+                return $this->notEligible('Exam class does not match the student home class.');
+            }
+        } else {
+            $history = StudentHistory::query()
+                ->where('student_id', $student->id)
+                ->where('academic_year_id', $exam->academic_year_id)
+                ->first();
+
+            if ($history === null || $history->class_id === null) {
+                return $this->notEligible('Student has no class history for the exam academic year.');
+            }
+
+            $classId = (int) $history->class_id;
+        }
+
         if ($classId < 1) {
             return $this->notEligible('Student has no assigned class.');
-        }
-        // Classless exams (school-wide UTS/UAS, exam.class_id NULL) are a deliberate
-        // domain capability: the grade slot is the student's home class. Mismatch
-        // validation applies only when the exam DOES carry an explicit class.
-        if ($exam->class_id !== null && (int) $exam->class_id !== $classId) {
-            return $this->notEligible('Exam class does not match the student home class.');
         }
 
         $classSubject = ClassSubject::where('class_id', $classId)
