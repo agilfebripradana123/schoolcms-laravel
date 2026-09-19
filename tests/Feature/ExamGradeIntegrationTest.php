@@ -26,6 +26,7 @@ use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Student;
 use App\Models\Students\StudentHistory;
 use App\Models\System\AuditLog;
+use App\Models\System\Permission;
 use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -1132,5 +1133,57 @@ class ExamGradeIntegrationTest extends TestCase
 
         $this->deleteJson("/api/exam-sessions/{$session->id}")->assertStatus(200);
         $this->assertNull(ExamSession::find($session->id));
+    }
+
+    // -----------------------------------------------------------------
+    // B20-F7 — manage-exam-results permission (teacher write)
+    // -----------------------------------------------------------------
+
+    private function syncedResultId(): int
+    {
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        return (int) ExamResult::where('participant_id', $this->participantMC->id)->value('id');
+    }
+
+    private function buildTeacherUser(string $roleName, ?string $permissionName): User
+    {
+        $role = Role::create(['name' => $roleName]);
+        $mtkId = QuestionBank::find($this->qMC->id)->subject_id;
+        $user = User::create(['name' => $roleName, 'email' => strtolower($roleName).'@b7.test', 'username' => strtolower($roleName), 'password' => 'x', 'role_id' => $role->id]);
+        if ($permissionName !== null) {
+            $permission = Permission::firstOrCreate(['name' => $permissionName]);
+            $user->permissions()->attach($permission->id);
+        }
+        $teacher = Teacher::create(['user_id' => $user->id, 'full_name' => $roleName]);
+        TeacherAssignment::create(['teacher_id' => $teacher->id, 'class_id' => $this->class1->id, 'subject_id' => $mtkId, 'academic_year_id' => $this->ay->id]);
+
+        return $user;
+    }
+
+    public function test_grade_sync_accepts_manage_exam_results_permission(): void
+    {
+        $resultId = $this->syncedResultId();
+
+        $manager = $this->buildTeacherUser('Wali Ujian', 'manage-exam-results');
+
+        Sanctum::actingAs($manager);
+        $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(200)
+            ->assertJsonPath('success', true);
+        $this->assertSame(1, Grade::count());
+    }
+
+    public function test_grade_sync_denied_without_grading_permission(): void
+    {
+        $resultId = $this->syncedResultId();
+
+        $staf = $this->buildTeacherUser('Staf', null);
+
+        Sanctum::actingAs($staf);
+        $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(403);
+        $this->assertSame(0, Grade::count());
     }
 }

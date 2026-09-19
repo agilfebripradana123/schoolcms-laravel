@@ -1208,9 +1208,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/exam-grading/attempts/{attempt}', [TeacherExamGradingController::class, 'show'])
             ->middleware('permission:view-exam-results');
         Route::put('/exam-grading/answers/{examAnswer}', [TeacherExamGradingController::class, 'grade'])
-            ->middleware('permission:view-exam-results');
+            ->middleware('permission:view-exam-results,manage-exam-results');
         Route::post('/exam-grading/results/{result}/grade-sync', [TeacherExamGradingController::class, 'syncGrade'])
-            ->middleware('permission:view-exam-results');
+            ->middleware('permission:view-exam-results,manage-exam-results');
         Route::get('/exam-reports/{exam}', [ExamReportController::class, 'index'])
             ->middleware('permission:view-exam-results');
         Route::get('/exam-reports/{exam}/questions', [ExamReportController::class, 'questions'])

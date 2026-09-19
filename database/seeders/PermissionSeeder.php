@@ -40,6 +40,7 @@ class PermissionSeeder extends Seeder
             ['name' => 'view-exams', 'description' => 'Melihat ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
             ['name' => 'view-exam-schedules', 'description' => 'Melihat jadwal ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
             ['name' => 'view-exam-results', 'description' => 'Melihat hasil ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
+            ['name' => 'manage-exam-results', 'description' => 'Mengubah/mensinkronkan hasil ujian pada mata pelajaran scope mengajar guru (Portal Guru).'],
             ['name' => 'view-exam-monitoring', 'description' => 'Melihat monitoring peserta ujian dan security events pada mata pelajaran scope mengajar guru (Portal Guru).'],
 
 

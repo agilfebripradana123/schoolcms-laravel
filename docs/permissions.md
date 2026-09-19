@@ -50,6 +50,8 @@ Admin hanya mengatur: **Role → Permission assignment**.
 | Permission | Description |
 |------------|-------------|
 | manage-exams | Mengelola ujian, bank soal, sesi, jadwal, instruksi, peserta, dan hasil. |
+| view-exam-results | Akses baca hasil ujian pada mata pelajaran scope mengajar guru (Portal Guru). |
+| manage-exam-results | Akses mutasi hasil ujian (pengisian nilai / grade-sync) guru pada scope mengajar. Catatan: jalur grading/sync guru saat ini menerima `view-exam-results,manage-exam-results` (OR) agar kompatibel ke belakang. |
 
 ## Facilities
 
