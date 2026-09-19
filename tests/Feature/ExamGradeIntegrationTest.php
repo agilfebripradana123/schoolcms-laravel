@@ -12,10 +12,13 @@ use App\Models\Academic\Semester;
 use App\Models\Academic\Subject;
 use App\Models\Examination\Exam;
 use App\Models\Examination\ExamAnswer;
+use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptQuestion;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\ExamResult;
+use App\Models\Examination\ExamSchedule;
+use App\Models\Examination\ExamSession;
 use App\Models\Examination\QuestionBank;
 use App\Models\Examination\QuestionOption;
 use App\Models\Staff\Teacher;
@@ -938,5 +941,196 @@ class ExamGradeIntegrationTest extends TestCase
 
         $this->assertSame(0, Grade::count());
         $this->assertSame(0, GradeAssessment::count());
+    }
+
+    // -----------------------------------------------------------------
+    // B20-F4 — exam delete / lifecycle protection
+    // -----------------------------------------------------------------
+
+    private function makeRawExam(string $status): Exam
+    {
+        return Exam::create([
+            'subject_id' => QuestionBank::find($this->qMC->id)->subject_id,
+            'title' => 'Raw '.$status,
+            'duration_minutes' => 30,
+            'status' => $status,
+            'class_id' => $this->class1->id,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'exam_type' => 'uts',
+        ]);
+    }
+
+    public function test_draft_exam_without_dependencies_can_be_soft_deleted(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $exam = $this->makeRawExam('draft');
+
+        $this->deleteJson("/api/exams/{$exam->id}")->assertStatus(200);
+
+        $this->assertNull(Exam::find($exam->id), 'exam no longer visible');
+        $trashed = Exam::withTrashed()->find($exam->id);
+        $this->assertNotNull($trashed);
+        $this->assertNotNull($trashed->deleted_at, 'soft delete, not hard delete');
+        $this->assertSame(0, ExamSchedule::where('exam_id', $exam->id)->count(), 'no dependent data deleted');
+        $this->assertSame(0, ExamParticipant::where('exam_id', $exam->id)->count());
+        $this->assertSame(1, AuditLog::where('action', 'exam_deleted')->where('model_id', $exam->id)->count());
+    }
+
+    public function test_draft_exam_with_participant_delete_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $exam = $this->makeRawExam('draft');
+        ExamParticipant::create(['exam_id' => $exam->id, 'student_id' => $this->studentA->id, 'exam_card_number' => 'CARD-D1', 'status' => 'registered']);
+
+        $res = $this->deleteJson("/api/exams/{$exam->id}");
+        $res->assertStatus(422)->assertJsonPath('message', 'Exam cannot be deleted because it has operational data.');
+
+        $this->assertNotNull(Exam::find($exam->id), 'exam not deleted');
+        $this->assertSame(1, ExamParticipant::where('exam_id', $exam->id)->count(), 'participant remains');
+    }
+
+    public function test_draft_exam_with_attempt_and_result_delete_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $exam = $this->makeRawExam('draft');
+        $participant = ExamParticipant::create(['exam_id' => $exam->id, 'student_id' => $this->studentA->id, 'exam_card_number' => 'CARD-D2', 'status' => 'registered']);
+        $attempt = ExamAttempt::create(['exam_participant_id' => $participant->id, 'exam_id' => $exam->id, 'attempt_number' => 1, 'status' => 'submitted', 'submitted_at' => now()]);
+        ExamResult::create(['participant_id' => $participant->id, 'exam_attempt_id' => $attempt->id, 'total_score' => 100, 'percentage' => 100, 'status' => 'graded']);
+
+        $this->deleteJson("/api/exams/{$exam->id}")->assertStatus(422);
+
+        $this->assertNotNull(Exam::find($exam->id), 'exam not deleted');
+        $this->assertSame(1, ExamAttempt::where('exam_id', $exam->id)->count(), 'attempt history remains');
+        $this->assertSame(1, ExamResult::where('participant_id', $participant->id)->count(), 'result history remains');
+    }
+
+    public function test_published_exam_delete_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exams/{$this->examMC->id}")->assertStatus(422)
+            ->assertJsonPath('message', 'Operational exam cannot be deleted; archive it instead.');
+        $this->assertNotNull(Exam::find($this->examMC->id), 'published exam remains visible');
+    }
+
+    public function test_ongoing_exam_delete_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $exam = $this->makeRawExam('ongoing');
+        $this->deleteJson("/api/exams/{$exam->id}")->assertStatus(422)
+            ->assertJsonPath('message', 'Operational exam cannot be deleted; archive it instead.');
+        $this->assertNotNull(Exam::find($exam->id));
+    }
+
+    public function test_completed_exam_delete_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $exam = $this->makeRawExam('completed');
+        $this->deleteJson("/api/exams/{$exam->id}")->assertStatus(422)
+            ->assertJsonPath('message', 'Operational exam cannot be deleted; archive it instead.');
+        $this->assertNotNull(Exam::find($exam->id));
+    }
+
+    public function test_archived_exam_delete_is_soft_never_hard_cascade(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $exam = $this->makeRawExam('archived');
+        ExamParticipant::create(['exam_id' => $exam->id, 'student_id' => $this->studentA->id, 'exam_card_number' => 'CARD-ARC', 'status' => 'registered']);
+
+        $this->deleteJson("/api/exams/{$exam->id}")->assertStatus(200);
+
+        $trashed = Exam::withTrashed()->find($exam->id);
+        $this->assertNotNull($trashed);
+        $this->assertNotNull($trashed->deleted_at);
+        $this->assertSame(1, ExamParticipant::where('exam_id', $exam->id)->count(), 'soft delete never cascades participants');
+    }
+
+    public function test_published_exam_identity_subject_locked(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $newSubject = Subject::create(['code' => 'BIN2', 'name' => 'Bingo']);
+
+        $this->putJson("/api/exams/{$this->examMC->id}", ['subject_id' => $newSubject->id])->assertStatus(422)
+            ->assertJsonPath('message', 'Exam identity fields cannot be modified when the exam is not in draft status.');
+        $this->assertSame($this->examMC->subject_id, Exam::find($this->examMC->id)->subject_id, 'subject unchanged');
+    }
+
+    public function test_published_exam_identity_class_locked(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $class2 = SchoolClass::create(['name' => '8A', 'level' => '8']);
+
+        $this->putJson("/api/exams/{$this->examMC->id}", ['class_id' => $class2->id])->assertStatus(422);
+        $this->assertSame($this->class1->id, (int) Exam::find($this->examMC->id)->class_id, 'class unchanged');
+    }
+
+    public function test_published_exam_identity_academic_year_locked(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $ay2 = AcademicYear::create(['name' => '2026/2027', 'is_active' => false]);
+
+        $this->putJson("/api/exams/{$this->examMC->id}", ['academic_year_id' => $ay2->id])->assertStatus(422);
+        $this->assertSame($this->ay->id, (int) Exam::find($this->examMC->id)->academic_year_id, 'academic year unchanged');
+    }
+
+    public function test_published_exam_identity_semester_locked(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $sem2 = Semester::create(['academic_year_id' => $this->ay->id, 'name' => '2', 'is_active' => false]);
+
+        $this->putJson("/api/exams/{$this->examMC->id}", ['semester_id' => $sem2->id])->assertStatus(422);
+        $this->assertSame($this->semester->id, (int) Exam::find($this->examMC->id)->semester_id, 'semester unchanged');
+    }
+
+    public function test_published_exam_identity_exam_type_locked(): void
+    {
+        Sanctum::actingAs($this->admin);
+
+        $this->putJson("/api/exams/{$this->examMC->id}", ['exam_type' => 'uas'])->assertStatus(422);
+        $this->assertSame('uts', Exam::find($this->examMC->id)->exam_type, 'exam type unchanged');
+    }
+
+    public function test_published_exam_unrelated_field_still_editable(): void
+    {
+        Sanctum::actingAs($this->admin);
+
+        $this->putJson("/api/exams/{$this->examMC->id}", ['title' => 'Judul Baru UTS'])->assertStatus(200)
+            ->assertJsonPath('data.title', 'Judul Baru UTS');
+        $this->assertSame(1, AuditLog::where('action', 'exam_updated')->where('model_id', $this->examMC->id)->count(), 'unrelated edit still audited');
+    }
+
+    public function test_rejected_identity_update_is_atomic_and_unaudited(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $newSubject = Subject::create(['code' => 'BIN3', 'name' => 'Bango']);
+
+        $res = $this->putJson("/api/exams/{$this->examMC->id}", ['subject_id' => $newSubject->id, 'title' => 'Boleh Berubah?']);
+        $res->assertStatus(422)->assertJsonPath('message', 'Exam identity fields cannot be modified when the exam is not in draft status.');
+
+        $exam = Exam::find($this->examMC->id);
+        $this->assertSame($this->examMC->subject_id, $exam->subject_id, 'no partial identity update');
+        $this->assertSame($this->examMC->title, $exam->title, 'no partial unrelated update');
+        $this->assertSame(0, AuditLog::where('action', 'exam_updated')->where('model_id', $this->examMC->id)->count(), 'rejected identity change writes no update audit');
+    }
+
+    public function test_session_with_referenced_schedule_delete_rejected(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $session = ExamSession::create(['name' => 'Sesi Terpakai', 'start_time' => '08:00', 'end_time' => '10:00']);
+        ExamSchedule::create(['exam_id' => $this->examMC->id, 'room_id' => 1, 'session_id' => $session->id, 'exam_date' => now()->toDateString()]);
+
+        $this->deleteJson("/api/exam-sessions/{$session->id}")->assertStatus(422)
+            ->assertJsonPath('message', 'Exam session is referenced by an exam schedule and cannot be deleted.');
+        $this->assertNotNull(ExamSession::find($session->id), 'session remains');
+        $this->assertSame(1, ExamSchedule::where('session_id', $session->id)->count(), 'schedule remains (no cascade)');
+    }
+
+    public function test_session_without_referenced_schedule_delete_succeeds(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $session = ExamSession::create(['name' => 'Sesi Bebas', 'start_time' => '08:00', 'end_time' => '10:00']);
+
+        $this->deleteJson("/api/exam-sessions/{$session->id}")->assertStatus(200);
+        $this->assertNull(ExamSession::find($session->id));
     }
 }

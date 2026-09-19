@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Examination\StoreExamSessionRequest;
 use App\Http\Requests\Api\Examination\UpdateExamSessionRequest;
 use App\Http\Resources\Examination\ExamSessionResource;
+use App\Models\Examination\ExamSchedule;
 use App\Models\Examination\ExamSession;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class ExamSessionController extends Controller
 {
@@ -86,22 +88,35 @@ class ExamSessionController extends Controller
 
     public function destroy(int $id): JsonResponse
     {
-        $session = ExamSession::find($id);
+        // B20-F4: a session referenced by an exam schedule must never be deleted —
+        // the FK cascade would silently remove the schedule (execution window)
+        // even for ongoing/completed exams.
+        return DB::transaction(function () use ($id) {
+            $session = ExamSession::where('id', $id)->lockForUpdate()->first();
 
-        if (!$session) {
+            if (!$session) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam session not found',
+                    'data' => null,
+                ], 404);
+            }
+
+            if (ExamSchedule::where('session_id', $id)->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam session is referenced by an exam schedule and cannot be deleted.',
+                    'data' => null,
+                ], 422);
+            }
+
+            $session->delete();
+
             return response()->json([
-                'success' => false,
-                'message' => 'Exam session not found',
+                'success' => true,
+                'message' => 'Exam session deleted successfully',
                 'data' => null,
-            ], 404);
-        }
-
-        $session->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Exam session deleted successfully',
-            'data' => null,
-        ]);
+            ]);
+        });
     }
 }
