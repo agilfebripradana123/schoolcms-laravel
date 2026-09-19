@@ -8,6 +8,7 @@ use App\Http\Requests\Api\Examination\UpdateExamParticipantRequest;
 use App\Http\Resources\Examination\ExamParticipantResource;
 use App\Models\Examination\ExamParticipant;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class ExamParticipantController extends Controller
 {
@@ -97,22 +98,35 @@ class ExamParticipantController extends Controller
 
     public function destroy(int $id): JsonResponse
     {
-        $participant = ExamParticipant::find($id);
+        return DB::transaction(function () use ($id) {
+            $participant = ExamParticipant::where('id', $id)->lockForUpdate()->first();
 
-        if (!$participant) {
+            if (!$participant) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam participant not found',
+                    'data' => null,
+                ], 404);
+            }
+
+            // Deleting a participant cascades attempts, answers, snapshots and
+            // results. Once examination activity exists, history must be
+            // preserved: reject deletion instead of destroying it.
+            if ($participant->attempts()->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Participant has examination activity and cannot be deleted.',
+                    'data' => null,
+                ], 422);
+            }
+
+            $participant->delete();
+
             return response()->json([
-                'success' => false,
-                'message' => 'Exam participant not found',
+                'success' => true,
+                'message' => 'Exam participant deleted successfully',
                 'data' => null,
-            ], 404);
-        }
-
-        $participant->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Exam participant deleted successfully',
-            'data' => null,
-        ]);
+            ]);
+        });
     }
 }

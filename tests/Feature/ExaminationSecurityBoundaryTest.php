@@ -6,6 +6,8 @@ use App\Models\Academic\Subject;
 use App\Models\Examination\Exam;
 use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
+use App\Models\Examination\ExamAttemptQuestion;
+use App\Models\Examination\ExamAttemptQuestionOption;
 use App\Models\Examination\ExamParticipant;
 use App\Models\Examination\ExamResult;
 use App\Models\Examination\QuestionBank;
@@ -691,5 +693,73 @@ class ExaminationSecurityBoundaryTest extends TestCase
         $res->assertStatus(201);
         $this->assertSame($this->attemptExpired->id, (int) $res->json('data.exam_attempt_id'));
         $this->assertSame(1, ExamResult::where('exam_attempt_id', $this->attemptExpired->id)->count());
+    }
+
+    // -----------------------------------------------------------------
+    // B18 — participant deletion guard (history preservation)
+    // -----------------------------------------------------------------
+
+    public function test_admin_can_delete_participant_without_attempts(): void
+    {
+        $exam2 = Exam::create([
+            'subject_id' => \App\Models\Academic\Subject::first()->id,
+            'title' => 'Ujian Tanpa Attempt',
+            'duration_minutes' => 60,
+            'status' => 'published',
+        ]);
+        $participant = ExamParticipant::create([
+            'exam_id' => $exam2->id,
+            'student_id' => $this->studentAId,
+            'exam_card_number' => 'CARD-NO-ATTEMPT',
+        ]);
+
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-participants/{$participant->id}")->assertStatus(200);
+        $this->assertNull(ExamParticipant::find($participant->id), 'participant without attempts can be deleted');
+    }
+
+    public function test_admin_cannot_delete_participant_with_active_attempt(): void
+    {
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-participants/{$this->participantBId}")->assertStatus(422);
+
+        $this->assertNotNull(ExamParticipant::find($this->participantBId), 'participant must remain');
+        $this->assertNotNull(ExamAttempt::find($this->attemptB->id), 'active attempt must remain');
+    }
+
+    public function test_admin_cannot_delete_participant_with_submitted_attempt_preserves_history(): void
+    {
+        $aq = ExamAttemptQuestion::create([
+            'exam_attempt_id' => $this->attemptA->id,
+            'source_question_id' => $this->questionId,
+            'question_text' => 'Historic Q',
+            'question_type' => 'multiple_choice',
+            'points' => 5,
+            'position' => 1,
+        ]);
+        ExamAttemptQuestionOption::create([
+            'attempt_question_id' => $aq->id,
+            'source_option_id' => null,
+            'option_text' => 'Historic A',
+            'position' => 1,
+            'is_correct' => true,
+        ]);
+
+        Sanctum::actingAs($this->admin);
+        $this->deleteJson("/api/exam-participants/{$this->participantAId}")->assertStatus(422);
+
+        $this->assertNotNull(ExamParticipant::find($this->participantAId));
+        $this->assertSame('submitted', ExamAttempt::find($this->attemptA->id)->status, 'submitted attempt remains');
+        $this->assertNotNull(ExamAttemptQuestion::find($aq->id), 'question snapshot remains');
+        $this->assertSame(1, ExamAttemptQuestionOption::where('attempt_question_id', $aq->id)->count(), 'snapshot options remain');
+        $this->assertNotNull(ExamResult::find($this->resultAId), 'result remains');
+        $this->assertNotNull(ExamAnswer::where('participant_id', $this->participantAId)->first(), 'answers remain');
+    }
+
+    public function test_non_admin_cannot_delete_participant(): void
+    {
+        Sanctum::actingAs($this->studentA);
+        $this->deleteJson("/api/exam-participants/{$this->participantAId}")->assertStatus(403);
+        $this->assertNotNull(ExamParticipant::find($this->participantAId));
     }
 }
