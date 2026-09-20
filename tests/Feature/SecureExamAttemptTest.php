@@ -623,6 +623,51 @@ class SecureExamAttemptTest extends TestCase
         $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => 999999])->assertStatus(422);
     }
 
+    public function test_answer_after_submitted_status_is_rejected(): void
+    {
+        // B20-F9-M1: an autosave that raced a submit must observe the new
+        // submitted status (re-checked AFTER the attempt row lock is acquired)
+        // and be rejected before any mutation.
+        $attemptId = $this->startFor($this->userA);
+        $s = $this->snap($attemptId);
+
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+        $this->asA()->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+
+        $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o2Id]])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Attempt is not active.');
+
+        // The rejected autosave never touched the persisted answer.
+        $this->assertSame(1, ExamAnswer::where('exam_attempt_id', $attemptId)->where('attempt_question_id', $s['q'.$this->q1Id])->count());
+        $this->assertDatabaseHas('exam_answers', [
+            'exam_attempt_id' => $attemptId,
+            'attempt_question_id' => $s['q'.$this->q1Id],
+            'selected_attempt_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id],
+        ]);
+    }
+
+    public function test_answer_mutation_rolls_back_with_the_attempt_lock_transaction(): void
+    {
+        // B20-F9-M1: the answer write happens inside the same transaction that
+        // holds the attempt lock, so rolling that transaction back removes the
+        // answer — autosave mutation can never half-persist.
+        $attemptId = $this->startFor($this->userA);
+        $s = $this->snap($attemptId);
+
+        try {
+            \Illuminate\Support\Facades\DB::transaction(function () use ($attemptId, $s) {
+                $this->asA()->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$s['q'.$this->q1Id]}", ['selected_option_id' => $s['q'.$this->q1Id.'o'.$this->q1o1Id]])->assertStatus(200);
+                throw new \RuntimeException('force rollback');
+            });
+            $this->fail('expected rollback exception');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('force rollback', $e->getMessage());
+        }
+
+        $this->assertSame(0, ExamAnswer::where('exam_attempt_id', $attemptId)->count(), 'rolled-back autosave leaves no answer row');
+    }
+
     // -----------------------------------------------------------------
     // Submit (idempotency, result)
     // -----------------------------------------------------------------

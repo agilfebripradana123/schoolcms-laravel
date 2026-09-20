@@ -57,107 +57,122 @@ class ExamGradeIntegrationService
      */
     public function sync(ExamResult $result, ?array $auditContext = null): array
     {
-        if ($result->exam_attempt_id === null) {
-            return $this->notEligible('Legacy result without an attempt cannot be mapped to an academic period.');
-        }
+        // B20-F9-M2: eligibility, the result lock, and every academic mutation
+        // now share ONE transaction. The ExamResult row is locked and re-read
+        // first, so a concurrent destroy() can never slip a Grade/GradeAssessment
+        // write under a result that disappeared: if destroy() commits first the
+        // locked re-read here finds nothing and rejects; if sync commits first
+        // the destroy() path sees the synced state through its own isSynced()
+        // guard and rejects. Lock order is always ExamResult -> Grade; there is
+        // never a reverse Grade -> ExamResult path.
+        $grade = DB::transaction(function () use ($result, $auditContext) {
+            $result = ExamResult::where('id', $result->id)->lockForUpdate()->first();
 
-        $attempt = ExamAttempt::find($result->exam_attempt_id);
-        if (! $attempt) {
-            return $this->notEligible('Attempt for this result no longer exists.');
-        }
-
-        if ($result->status !== 'graded') {
-            return $this->notEligible('Result is not fully graded (pending manual essay grading).');
-        }
-
-        if (! app(ExamScoringService::class)->isFullyGraded($attempt)) {
-            return $this->notEligible('Result has answered essays that are not yet graded.');
-        }
-
-        $exam = $attempt->exam;
-        $participant = $result->participant;
-
-        // B20-F5 (central rule, covers admin + teacher sync and F1/F5 re-sync):
-        // a soft-deleted (archived/non-operational) exam can never be the source
-        // of a NEW or re-synchronized academic grade. Exam uses SoftDeletes, so a
-        // null relation is the reliable trashed signal.
-        if ($exam === null) {
-            return $this->notEligible('Exam is no longer operational and cannot be synchronized.');
-        }
-
-        if (! $participant) {
-            return $this->notEligible('Participant for this result is missing.');
-        }
-
-        $type = $exam->exam_type;
-        if (! in_array($type, self::SYNCABLE_EXAM_TYPES, true)) {
-            return $this->notEligible(sprintf('Exam type "%s" has no supported academic grade representation.', $type ?: 'null'));
-        }
-
-        if ($exam->academic_year_id === null || $exam->semester_id === null) {
-            return $this->notEligible('Exam has no academic year/semester context (legacy exam) and cannot be safely mapped.');
-        }
-
-        $subject = $exam->subject;
-        $student = $participant->student;
-
-        if (! $subject || ! $student) {
-            return $this->notEligible('Subject or student could not be resolved.');
-        }
-
-        // B20-F3: class context resolution.
-        //
-        // Explicit-class exams keep the historical behavior: the grade slot is
-        // the exam's own class and must match the student's home class.
-        //
-        // Classless exams (school-wide UTS/UAS, exam.class_id NULL) resolve the
-        // grade slot from the student's academic-year class membership
-        // (`student_histories`, one authoritative row per student+academic year).
-        // Current `students.class_id` is NEVER used as a fallback, and a missing
-        // history row rejects the sync instead of guessing.
-        $classId = null;
-
-        if ($exam->class_id !== null) {
-            $classId = (int) $exam->class_id;
-
-            if ((int) $student->class_id !== $classId) {
-                return $this->notEligible('Exam class does not match the student home class.');
-            }
-        } else {
-            $history = StudentHistory::query()
-                ->where('student_id', $student->id)
-                ->where('academic_year_id', $exam->academic_year_id)
-                ->first();
-
-            if ($history === null || $history->class_id === null) {
-                return $this->notEligible('Student has no class history for the exam academic year.');
+            if ($result === null) {
+                return $this->notEligible('Result no longer exists.');
             }
 
-            $classId = (int) $history->class_id;
-        }
+            if ($result->exam_attempt_id === null) {
+                return $this->notEligible('Legacy result without an attempt cannot be mapped to an academic period.');
+            }
 
-        if ($classId < 1) {
-            return $this->notEligible('Student has no assigned class.');
-        }
+            $attempt = ExamAttempt::find($result->exam_attempt_id);
+            if (! $attempt) {
+                return $this->notEligible('Attempt for this result no longer exists.');
+            }
 
-        $classSubject = ClassSubject::where('class_id', $classId)
-            ->where('subject_id', $subject->id)
-            ->exists();
-        if (! $classSubject) {
-            return $this->notEligible('Subject is not assigned to the student class.');
-        }
+            if ($result->status !== 'graded') {
+                return $this->notEligible('Result is not fully graded (pending manual essay grading).');
+            }
 
-        $score = (float) $result->percentage;
+            if (! app(ExamScoringService::class)->isFullyGraded($attempt)) {
+                return $this->notEligible('Result has answered essays that are not yet graded.');
+            }
 
-        // Phase 2J + 2L-7F: never overwrite or create an academic Grade in a
-        // finalized (or published-report-card locked) slot, even when the
-        // bucket Grade row does not exist yet.
-        //
-        // B20-F2-F6: the mutability decision and the write now share ONE
-        // transaction, and the target Grade row is locked before the guard and
-        // the write — a concurrent grade finalization cannot slip between the
-        // mutability check and the updateOrCreate (TOCTOU).
-        $grade = DB::transaction(function () use ($result, $student, $subject, $classId, $type, $exam, $score, $auditContext) {
+            $exam = $attempt->exam;
+            $participant = $result->participant;
+
+            // B20-F5 (central rule, covers admin + teacher sync and F1/F5 re-sync):
+            // a soft-deleted (archived/non-operational) exam can never be the source
+            // of a NEW or re-synchronized academic grade. Exam uses SoftDeletes, so a
+            // null relation is the reliable trashed signal.
+            if ($exam === null) {
+                return $this->notEligible('Exam is no longer operational and cannot be synchronized.');
+            }
+
+            if (! $participant) {
+                return $this->notEligible('Participant for this result is missing.');
+            }
+
+            $type = $exam->exam_type;
+            if (! in_array($type, self::SYNCABLE_EXAM_TYPES, true)) {
+                return $this->notEligible(sprintf('Exam type "%s" has no supported academic grade representation.', $type ?: 'null'));
+            }
+
+            if ($exam->academic_year_id === null || $exam->semester_id === null) {
+                return $this->notEligible('Exam has no academic year/semester context (legacy exam) and cannot be safely mapped.');
+            }
+
+            $subject = $exam->subject;
+            $student = $participant->student;
+
+            if (! $subject || ! $student) {
+                return $this->notEligible('Subject or student could not be resolved.');
+            }
+
+            // B20-F3: class context resolution.
+            //
+            // Explicit-class exams keep the historical behavior: the grade slot is
+            // the exam's own class and must match the student's home class.
+            //
+            // Classless exams (school-wide UTS/UAS, exam.class_id NULL) resolve the
+            // grade slot from the student's academic-year class membership
+            // (`student_histories`, one authoritative row per student+academic year).
+            // Current `students.class_id` is NEVER used as a fallback, and a missing
+            // history row rejects the sync instead of guessing.
+            $classId = null;
+
+            if ($exam->class_id !== null) {
+                $classId = (int) $exam->class_id;
+
+                if ((int) $student->class_id !== $classId) {
+                    return $this->notEligible('Exam class does not match the student home class.');
+                }
+            } else {
+                $history = StudentHistory::query()
+                    ->where('student_id', $student->id)
+                    ->where('academic_year_id', $exam->academic_year_id)
+                    ->first();
+
+                if ($history === null || $history->class_id === null) {
+                    return $this->notEligible('Student has no class history for the exam academic year.');
+                }
+
+                $classId = (int) $history->class_id;
+            }
+
+            if ($classId < 1) {
+                return $this->notEligible('Student has no assigned class.');
+            }
+
+            $classSubject = ClassSubject::where('class_id', $classId)
+                ->where('subject_id', $subject->id)
+                ->exists();
+            if (! $classSubject) {
+                return $this->notEligible('Subject is not assigned to the student class.');
+            }
+
+            $score = (float) $result->percentage;
+
+            // Phase 2J + 2L-7F: never overwrite or create an academic Grade in a
+            // finalized (or published-report-card locked) slot, even when the
+            // bucket Grade row does not exist yet.
+            //
+            // B20-F2-F6: the mutability decision and the write share ONE
+            // transaction, and the target Grade row is locked before the guard and
+            // the write — a concurrent grade finalization cannot slip between the
+            // mutability check and the updateOrCreate (TOCTOU). The ExamResult
+            // lock above precedes this Grade lock (ExamResult -> Grade order).
             $guard = app(GradeMutationGuard::class);
 
             $lockedGrade = Grade::where('student_id', $student->id)
@@ -240,6 +255,10 @@ class ExamGradeIntegrationService
 
             return $grade;
         });
+
+        if (is_array($grade)) {
+            return $grade;
+        }
 
         return ['ok' => true, 'message' => 'Grade synchronized successfully.', 'grade' => $grade];
     }

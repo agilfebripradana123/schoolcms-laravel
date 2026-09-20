@@ -819,6 +819,58 @@ class ExamGradeIntegrationTest extends TestCase
         $this->assertSame($auditBefore, AuditLog::count(), 'rejected sync writes no audit');
     }
 
+    // -----------------------------------------------------------------
+    // B20-F9-M2 — result lock + re-read before Grade mutation
+    // -----------------------------------------------------------------
+
+    public function test_sync_re_reads_locked_result_and_rejects_deleted_result(): void
+    {
+        // B20-F9-M2: sync() locks and re-reads the ExamResult inside its
+        // transaction. A result deleted after the caller's initial read can
+        // never reach Grade/GradeAssessment mutation.
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $result = ExamResult::where('participant_id', $this->participantMC->id)->firstOrFail();
+
+        // The caller still holds a (now stale) in-memory result object; the row
+        // is gone by the time sync() acquires the lock, so the locked re-read
+        // sees nothing and the sync is rejected.
+        $result->delete();
+
+        $outcome = app(\App\Services\Examination\ExamGradeIntegrationService::class)->sync($result, ['ip_address' => '127.0.0.1']);
+
+        $this->assertFalse($outcome['ok']);
+        $this->assertSame('Result no longer exists.', $outcome['message']);
+        $this->assertSame(0, Grade::count(), 'no grade row for a deleted result');
+        $this->assertSame(0, GradeAssessment::count(), 'no assessment referencing a deleted result');
+        $this->assertSame(0, AuditLog::where('action', 'exam_grade_synced')->count(), 'rejected sync writes no audit');
+    }
+
+    public function test_sync_uses_lock_re_read_result_not_stale_in_memory(): void
+    {
+        // B20-F9-M2: eligibility and persistence run against the row re-read
+        // AFTER the lock, never against the caller's stale in-memory object.
+        // A concurrent value change on the row must be honored.
+        $attemptId = $this->startAsA($this->examMC->id);
+        $ref = $this->correctOption($attemptId, $this->qMC->id);
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$ref['aq']}", ['selected_option_id' => $ref['correct']])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $result = ExamResult::where('participant_id', $this->participantMC->id)->firstOrFail();
+        $this->assertSame(100.0, (float) $result->percentage, 'sanity: in-memory result is 100%');
+
+        // Simulate a concurrent row change the stale in-memory object cannot see.
+        ExamResult::where('id', $result->id)->update(['percentage' => 55.00]);
+
+        $outcome = app(\App\Services\Examination\ExamGradeIntegrationService::class)->sync($result, ['ip_address' => '127.0.0.1']);
+
+        $this->assertTrue($outcome['ok']);
+        $grade = Grade::where('type', 'uts')->firstOrFail();
+        $this->assertSame(55.0, (float) $grade->score, 'persisted value comes from the locked re-read, not the stale object');
+        $this->assertSame(55.0, (float) GradeAssessment::where('source_type', 'exam_result')->where('source_id', $result->id)->firstOrFail()->score);
+    }
+
     private function classlessExamResult(int $academicYearId, int $semesterId): int
     {
         $mtkId = QuestionBank::find($this->qMC->id)->subject_id;

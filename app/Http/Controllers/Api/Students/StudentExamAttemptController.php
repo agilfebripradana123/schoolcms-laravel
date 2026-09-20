@@ -237,74 +237,88 @@ class StudentExamAttemptController extends Controller
         $student = $request->attributes->get('student_profile');
         $now = now();
 
-        $attempt = $this->resolveOwnedAttempt($student, $attemptId);
-        if ($attempt === null) {
-            return $this->notFound('Attempt not found.');
-        }
-
-        $this->lazyExpire($attempt, $now);
-
-        if ($attempt->status !== ExamAttempt::STATUS_ACTIVE) {
-            return $this->unprocessable('Attempt is not active.', $this->attemptPayload($attempt, $now));
-        }
-
-        // Question must belong to this attempt's snapshot.
-        $attemptQuestion = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
-            ->where('id', $questionId)
-            ->first();
-
-        if (!$attemptQuestion) {
-            return $this->unprocessable('Question does not belong to this attempt.');
-        }
-
-        $validated = $request->validate([
-            'selected_option_id' => ['nullable', 'integer'],
-            'essay_answer' => ['nullable', 'string'],
-        ]);
-
-        $selectedAttemptOption = null;
-        if (!empty($validated['selected_option_id'])) {
-            // The option id is the SNAPSHOT attempt-option id.
-            $selectedAttemptOption = ExamAttemptQuestionOption::where('attempt_question_id', $attemptQuestion->id)
-                ->where('id', (int) $validated['selected_option_id'])
-                ->first();
-            if (!$selectedAttemptOption) {
-                return $this->unprocessable('Invalid option for this question.');
+        return DB::transaction(function () use ($request, $attemptId, $questionId, $student, $now) {
+            $attempt = $this->resolveOwnedAttempt($student, $attemptId);
+            if ($attempt === null) {
+                return $this->notFound('Attempt not found.');
             }
-        }
 
-        // Correctness is resolved server-side from the snapshot (never client).
-        $isCorrect = null;
-        if ($selectedAttemptOption !== null && in_array($attemptQuestion->question_type, ['multiple_choice', 'true_false'], true)) {
-            $isCorrect = (bool) $selectedAttemptOption->is_correct;
-        }
+            // B20-F9-M1: the autosave runs against the same locked attempt row
+            // that submit() locks, so it can never commit an answer after a
+            // concurrent submit transitioned the attempt to submitted. If the
+            // attempt vanished between ownership resolution and the lock, treat
+            // it as gone.
+            $attempt = ExamAttempt::where('id', $attempt->id)->lockForUpdate()->first();
+            if ($attempt === null) {
+                return $this->notFound('Attempt not found.');
+            }
 
-        // Idempotent autosave keyed by (attempt, snapshot question).
-        $answer = ExamAnswer::where('exam_attempt_id', $attempt->id)
-            ->where('attempt_question_id', $attemptQuestion->id)
-            ->first();
+            // Re-run lazy expiration under the lock, then re-check ACTIVE AFTER
+            // the lock so a just-submitted/just-expired attempt rejects autosaves.
+            $this->lazyExpire($attempt, $now);
 
-        if ($answer === null) {
-            $answer = new ExamAnswer();
-            $answer->exam_attempt_id = $attempt->id;
-            $answer->participant_id = $attempt->exam_participant_id;
-            $answer->attempt_question_id = $attemptQuestion->id;
-            $answer->question_id = $attemptQuestion->source_question_id;
-        }
+            if ($attempt->status !== ExamAttempt::STATUS_ACTIVE) {
+                return $this->unprocessable('Attempt is not active.', $this->attemptPayload($attempt, $now));
+            }
 
-        $answer->selected_attempt_option_id = $selectedAttemptOption?->id;
-        $answer->selected_option_id = null; // snapshot identity is authoritative
-        $answer->essay_answer = $validated['essay_answer'] ?? null;
-        $answer->is_correct = $isCorrect;
-        $answer->answered_at = $now;
-        $answer->save();
+            // Question must belong to this attempt's snapshot.
+            $attemptQuestion = ExamAttemptQuestion::where('exam_attempt_id', $attempt->id)
+                ->where('id', $questionId)
+                ->first();
 
-        return $this->ok('Answer saved.', [
-            'question_id' => $questionId,
-            'selected_option_id' => $answer->selected_attempt_option_id,
-            'essay_answer' => $answer->essay_answer,
-            'answered_at' => $answer->answered_at?->toISOString(),
-        ]);
+            if (!$attemptQuestion) {
+                return $this->unprocessable('Question does not belong to this attempt.');
+            }
+
+            $validated = $request->validate([
+                'selected_option_id' => ['nullable', 'integer'],
+                'essay_answer' => ['nullable', 'string'],
+            ]);
+
+            $selectedAttemptOption = null;
+            if (!empty($validated['selected_option_id'])) {
+                // The option id is the SNAPSHOT attempt-option id.
+                $selectedAttemptOption = ExamAttemptQuestionOption::where('attempt_question_id', $attemptQuestion->id)
+                    ->where('id', (int) $validated['selected_option_id'])
+                    ->first();
+                if (!$selectedAttemptOption) {
+                    return $this->unprocessable('Invalid option for this question.');
+                }
+            }
+
+            // Correctness is resolved server-side from the snapshot (never client).
+            $isCorrect = null;
+            if ($selectedAttemptOption !== null && in_array($attemptQuestion->question_type, ['multiple_choice', 'true_false'], true)) {
+                $isCorrect = (bool) $selectedAttemptOption->is_correct;
+            }
+
+            // Idempotent autosave keyed by (attempt, snapshot question).
+            $answer = ExamAnswer::where('exam_attempt_id', $attempt->id)
+                ->where('attempt_question_id', $attemptQuestion->id)
+                ->first();
+
+            if ($answer === null) {
+                $answer = new ExamAnswer();
+                $answer->exam_attempt_id = $attempt->id;
+                $answer->participant_id = $attempt->exam_participant_id;
+                $answer->attempt_question_id = $attemptQuestion->id;
+                $answer->question_id = $attemptQuestion->source_question_id;
+            }
+
+            $answer->selected_attempt_option_id = $selectedAttemptOption?->id;
+            $answer->selected_option_id = null; // snapshot identity is authoritative
+            $answer->essay_answer = $validated['essay_answer'] ?? null;
+            $answer->is_correct = $isCorrect;
+            $answer->answered_at = $now;
+            $answer->save();
+
+            return $this->ok('Answer saved.', [
+                'question_id' => $questionId,
+                'selected_option_id' => $answer->selected_attempt_option_id,
+                'essay_answer' => $answer->essay_answer,
+                'answered_at' => $answer->answered_at?->toISOString(),
+            ]);
+        });
     }
 
     /**
