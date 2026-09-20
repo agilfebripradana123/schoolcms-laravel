@@ -380,6 +380,12 @@ class ExamGradeIntegrationTest extends TestCase
         $this->teacherB = $teacherBUser;
         $this->studentA = Student::create(['user_id' => $userA->id, 'name' => 'Siswa A', 'nis' => 'A01']);
 
+        // B21-01: essay grading + grade-sync are write operations requiring
+        // manage-exam-results (Guru default grants view-exam-results only).
+        $manageExamResults = Permission::firstOrCreate(['name' => 'manage-exam-results']);
+        $teacherAUser->permissions()->attach($manageExamResults->id);
+        $teacherBUser->permissions()->attach($manageExamResults->id);
+
         $this->ay = AcademicYear::create(['name' => '2025/2026', 'is_active' => true]);
         $this->semester = Semester::create(['academic_year_id' => $this->ay->id, 'name' => '1', 'is_active' => true]);
         $this->class1 = SchoolClass::create(['name' => '7A', 'level' => '7']);
@@ -1237,5 +1243,78 @@ class ExamGradeIntegrationTest extends TestCase
         Sanctum::actingAs($staf);
         $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(403);
         $this->assertSame(0, Grade::count());
+    }
+
+    public function test_view_exam_results_only_teacher_cannot_grade_or_sync(): void
+    {
+        // B21-01: default Guru holds view-exam-results (read) but not
+        // manage-exam-results — essay grade and grade-sync must be denied (403).
+        $attemptId = $this->startAsA($this->examEssay->id);
+        $aq = ExamAttemptQuestion::where('exam_attempt_id', $attemptId)->where('question_type', 'essay')->firstOrFail();
+        $this->putJson("/api/student/exam-attempts/{$attemptId}/answers/{$aq->id}", ['essay_answer' => 'jawaban'])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attemptId}/submit")->assertStatus(200);
+        $answerId = ExamAnswer::where('exam_attempt_id', $attemptId)->value('id');
+        $resultId = ExamResult::where('exam_attempt_id', $attemptId)->value('id');
+
+        $viewOnly = $this->buildTeacherUser('Guru', null);
+
+        Sanctum::actingAs($viewOnly);
+        $this->getJson('/api/teacher/exam-results')->assertStatus(200);
+        $this->putJson("/api/teacher/exam-grading/answers/{$answerId}", ['score' => 16])->assertStatus(403);
+        $this->postJson("/api/teacher/exam-grading/results/{$resultId}/grade-sync")->assertStatus(403);
+        $this->assertSame(0, Grade::count(), 'view-only teacher can never write an academic grade');
+    }
+
+    // -----------------------------------------------------------------
+    // B21-10 — teacher resync only writes the EFFECTIVE result
+    // -----------------------------------------------------------------
+
+    public function test_teacher_regrade_of_superseded_synced_result_does_not_overwrite_grade(): void
+    {
+        $mtkId = QuestionBank::find($this->qEssay->id)->subject_id;
+        $exam = Exam::create([
+            'subject_id' => $mtkId,
+            'class_id' => $this->class1->id,
+            'academic_year_id' => $this->ay->id,
+            'semester_id' => $this->semester->id,
+            'exam_type' => 'uts',
+            'title' => 'UTS super',
+            'duration_minutes' => 30,
+            'max_attempts' => 2,
+            'status' => 'published',
+        ]);
+        ExamQuestion::create(['exam_id' => $exam->id, 'question_id' => $this->qEssay->id, 'position' => 1, 'points' => 20]);
+        ExamParticipant::create(['exam_id' => $exam->id, 'student_id' => $this->studentA->id, 'exam_card_number' => 'CARD-SUP', 'status' => 'registered', 'login_allowed' => true]);
+
+        // Attempt 1 -> teacher grade (16/20) -> explicit grade-sync creates the grade.
+        $attempt1 = $this->startAsA($exam->id);
+        $aq1 = ExamAttemptQuestion::where('exam_attempt_id', $attempt1)->where('question_type', 'essay')->first();
+        $this->putJson("/api/student/exam-attempts/{$attempt1}/answers/{$aq1->id}", ['essay_answer' => 'jaw1'])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attempt1}/submit")->assertStatus(200);
+        $answer1 = ExamAnswer::where('exam_attempt_id', $attempt1)->value('id');
+        $result1 = ExamResult::where('exam_attempt_id', $attempt1)->value('id');
+
+        Sanctum::actingAs($this->teacherA);
+        $this->putJson("/api/teacher/exam-grading/answers/{$answer1}", ['score' => 16])->assertStatus(200);
+        $this->postJson("/api/teacher/exam-grading/results/{$result1}/grade-sync")->assertStatus(200);
+
+        $grade = Grade::where('student_id', $this->studentA->id)->where('type', 'uts')->firstOrFail();
+        $this->assertSame(80.0, (float) $grade->score);
+        $this->assertSame(1, AuditLog::where('action', 'exam_grade_synced')->where('model_id', $result1)->count());
+
+        // Attempt 2 (newer submission) supersedes result1.
+        $attempt2 = $this->startAsA($exam->id);
+        $aq2 = ExamAttemptQuestion::where('exam_attempt_id', $attempt2)->where('question_type', 'essay')->first();
+        $this->putJson("/api/student/exam-attempts/{$attempt2}/answers/{$aq2->id}", ['essay_answer' => 'jaw2'])->assertStatus(200);
+        $this->postJson("/api/student/exam-attempts/{$attempt2}/submit")->assertStatus(200);
+
+        // Regrade the SUPERSEDED attempt-1 essay: B21-10 gate must skip re-sync.
+        Sanctum::actingAs($this->teacherA);
+        $this->putJson("/api/teacher/exam-grading/answers/{$answer1}", ['score' => 12])->assertStatus(200);
+
+        $grade->refresh();
+        $this->assertSame(80.0, (float) $grade->score, 'superseded result must not overwrite the academic grade');
+        $this->assertSame(1, AuditLog::where('action', 'exam_grade_synced')->where('model_id', $result1)->count(), 'no re-sync audit for the superseded result');
+        $this->assertSame((int) $result1, (int) GradeAssessment::where('source_type', 'exam_result')->value('source_id'), 'assessment provenance stays on the first result');
     }
 }

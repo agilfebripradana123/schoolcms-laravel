@@ -135,7 +135,42 @@ class TeacherExamGradingController extends Controller
 
         // Answer mutation + result recomputation (+ optional re-sync) + audit
         // share a single transaction so a failed operation leaves nothing behind.
-        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $answer, $attempt, $question, $score) {
+        //
+        // B21-02: the ExamResult row is locked FIRST inside the transaction and
+        // finality is re-checked against the locked row before any ExamAnswer
+        // mutation, so a concurrent finalize() can never produce a "finalized
+        // result + mutated essay answer" state. Lock order is ExamResult ->
+        // ExamAnswer; no other path locks ExamAnswer rows, so there is no cycle.
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $answer, $attempt, $score) {
+            $lockedResult = \App\Models\Examination\ExamResult::where('exam_attempt_id', $attempt->id)
+                ->lockForUpdate()
+                ->first();
+
+            // Authoritative finality check under the result lock. The pre-lock
+            // fast-path check above is only an optimization; this is the source
+            // of truth.
+            if ($lockedResult !== null && $lockedResult->is_final) {
+                return $this->unprocessable('Result is finalized and cannot be modified.');
+            }
+
+            // Lock the answer row only AFTER the result row (ExamResult -> ExamAnswer).
+            $answer = ExamAnswer::where('id', $answer->id)->lockForUpdate()->first();
+
+            if (! $answer || (int) $answer->exam_attempt_id !== (int) $attempt->id) {
+                return $this->notFound('Exam answer not found.');
+            }
+
+            // Re-validate attempt state and essay type against the locked row's
+            // fresh relations, preserving the existing semantics.
+            $attempt = $answer->attempt;
+            $question = $answer->attemptQuestion;
+            if (! $attempt || ! in_array($attempt->status, ['submitted', 'expired'], true)) {
+                return $this->unprocessable('Active attempts cannot be graded yet.');
+            }
+            if (! $question || $question->question_type !== 'essay') {
+                return $this->unprocessable('Only essay answers can be manually graded.');
+            }
+
             $scoreBefore = $answer->score;
 
             $answer->score = $score;
@@ -147,8 +182,10 @@ class TeacherExamGradingController extends Controller
             $answer->graded_at = now();
             $answer->save();
 
-            // Recompute the participant result from the snapshot (idempotent).
-            $result = app(ExamScoringService::class)->scoreAttempt($attempt);
+            // Recompute the participant result from the snapshot (idempotent);
+            // its nested result lock reuses the row already locked above.
+            $scoring = app(ExamScoringService::class);
+            $result = $scoring->scoreAttempt($attempt);
 
             $auditContext = [
                 'user_id' => $request->user()?->id,
@@ -160,9 +197,13 @@ class TeacherExamGradingController extends Controller
             // academic Grade, re-sync so the academic value never goes stale —
             // UNLESS the grade is finalized/locked (Grade.is_final stays the
             // authoritative lock; a locked academic value is never overwritten).
-            $resultRow = \App\Models\Examination\ExamResult::where('exam_attempt_id', $attempt->id)->first();
+            //
+            // B21-10: re-sync only when the locked result is still the participant's
+            // EFFECTIVE result — a superseded result must never overwrite the
+            // academic Grade.
+            $resultRow = $lockedResult;
             $gradeIntegration = app(ExamGradeIntegrationService::class);
-            if ($resultRow && $gradeIntegration->isSynced($resultRow)) {
+            if ($resultRow && $scoring->isEffectiveResult($resultRow) && $gradeIntegration->isSynced($resultRow)) {
                 // Source tracing lives on GradeAssessment; resolve the matching
                 // academic Grade via the assessment identity.
                 $assessment = \App\Models\Academic\GradeAssessment::where('source_type', 'exam_result')

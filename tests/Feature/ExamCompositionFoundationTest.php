@@ -474,8 +474,113 @@ class ExamCompositionFoundationTest extends TestCase
     }
 
     // -----------------------------------------------------------------
-    // I. authorization
+    // I. B21-03 — post-publish question bank protection
     // -----------------------------------------------------------------
+
+    private function makeOperationalQuestion(string $status, string $text): QuestionBank
+    {
+        $subject = Subject::find($this->qApproved->subject_id);
+        $question = $this->makeQuestion($subject, 'approved', $text, 10);
+        $exam = Exam::create(['subject_id' => $subject->id, 'title' => "Exam $status", 'duration_minutes' => 30, 'status' => $status]);
+        ExamQuestion::create(['exam_id' => $exam->id, 'question_id' => $question->id, 'position' => 1, 'points' => 10]);
+
+        return $question;
+    }
+
+    public function test_uncomposed_question_remains_editable_and_deletable(): void
+    {
+        $this->actAsAdmin();
+        // qOtherSubject is never composed into any exam.
+        $this->putJson('/api/questions/'.$this->qOtherSubject->id, ['question_text' => 'Edited?'])->assertStatus(200);
+        $this->deleteJson('/api/questions/'.$this->qOtherSubject->id)->assertStatus(200);
+    }
+
+    public function test_draft_only_composition_remains_editable_and_deletable(): void
+    {
+        $this->actAsAdmin();
+        $subject = Subject::find($this->qApproved->subject_id);
+        $question = $this->makeQuestion($subject, 'approved', 'DraftQ?', 10);
+        ExamQuestion::create(['exam_id' => $this->draftExam->id, 'question_id' => $question->id, 'position' => 1, 'points' => 10]);
+
+        $this->putJson('/api/questions/'.$question->id, ['question_text' => 'Draft Edited?'])->assertStatus(200);
+        $this->deleteJson('/api/questions/'.$question->id)->assertStatus(200);
+    }
+
+    public function test_published_composed_question_update_and_delete_rejected(): void
+    {
+        $this->actAsAdmin();
+        // qApproved is composed into composedExam (status published).
+        $this->putJson('/api/questions/'.$this->qApproved->id, ['question_text' => 'Nope?'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Question is composed into an operational exam and cannot be modified.');
+        $this->deleteJson('/api/questions/'.$this->qApproved->id)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Question is composed into an operational exam and cannot be deleted.');
+    }
+
+    public function test_ongoing_and_completed_composed_question_update_and_delete_rejected(): void
+    {
+        $this->actAsAdmin();
+        foreach (['ongoing', 'completed'] as $status) {
+            $question = $this->makeOperationalQuestion($status, "Q $status?");
+            $this->putJson('/api/questions/'.$question->id, ['question_text' => 'X'])->assertStatus(422);
+            $this->deleteJson('/api/questions/'.$question->id)->assertStatus(422);
+        }
+    }
+
+    public function test_archived_only_composition_remains_mutable(): void
+    {
+        $this->actAsAdmin();
+        $question = $this->makeOperationalQuestion('archived', 'ArchQ?');
+        $this->putJson('/api/questions/'.$question->id, ['question_text' => 'OK?'])->assertStatus(200);
+        $this->deleteJson('/api/questions/'.$question->id)->assertStatus(200);
+    }
+
+    public function test_published_plus_draft_composition_still_blocks_mutation(): void
+    {
+        $this->actAsAdmin();
+        $subject = Subject::find($this->qApproved->subject_id);
+        $question = $this->makeQuestion($subject, 'approved', 'BothQ?', 10);
+        ExamQuestion::create(['exam_id' => $this->composedExam->id, 'question_id' => $question->id, 'position' => 1, 'points' => 10]);
+        ExamQuestion::create(['exam_id' => $this->draftExam->id, 'question_id' => $question->id, 'position' => 1, 'points' => 10]);
+
+        $this->putJson('/api/questions/'.$question->id, ['question_text' => 'Blocked?'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Question is composed into an operational exam and cannot be modified.');
+        $this->deleteJson('/api/questions/'.$question->id)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Question is composed into an operational exam and cannot be deleted.');
+    }
+
+    public function test_archived_only_composition_leaves_question_mutable(): void
+    {
+        $this->actAsAdmin();
+        $question = $this->makeOperationalQuestion('archived', 'ArchQ?');
+        $this->putJson('/api/questions/'.$question->id, ['question_text' => 'Editable even archived?'])
+            ->assertStatus(200)
+            ->assertJsonPath('message', 'Question updated successfully');
+        $this->deleteJson('/api/questions/'.$question->id)->assertStatus(200);
+    }
+
+    public function test_completed_plus_draft_composition_still_blocks_question_mutation(): void
+    {
+        $this->actAsAdmin();
+        $subject = Subject::find($this->qApproved->subject_id);
+        $question = $this->makeQuestion($subject, 'approved', 'BothQ?', 10);
+        ExamQuestion::create(['exam_id' => $this->composedExam->id, 'question_id' => $question->id, 'position' => 2, 'points' => 10]);
+        Exam::where('id', $this->composedExam->id)->update(['status' => 'completed']);
+        ExamQuestion::create(['exam_id' => $this->draftExam->id, 'question_id' => $question->id, 'position' => 2, 'points' => 10]);
+
+        // A single completed-composed question can never be bank-mutated even
+        // when a parallel draft composition also references it — operational
+        // immutability always wins (B21-03).
+        $this->putJson('/api/questions/'.$question->id, ['question_text' => 'Blocked?'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Question is composed into an operational exam and cannot be modified.');
+        $this->deleteJson('/api/questions/'.$question->id)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Question is composed into an operational exam and cannot be deleted.');
+    }
 
     public function test_unauthenticated_rejected(): void
     {

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Examination\StoreQuestionRequest;
 use App\Http\Requests\Api\Examination\UpdateQuestionRequest;
 use App\Http\Resources\Examination\QuestionBankResource;
+use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\QuestionBank;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,6 +14,18 @@ use Illuminate\Support\Facades\DB;
 
 class QuestionController extends Controller
 {
+    // B21-03: a question composed into an exam that has left the draft stage is
+    // part of that exam's live definition — mutating or deleting it would
+    // silently alter delivered/attempted content. draft/archived compositions
+    // stay mutable (snapshots already freeze delivered attempts).
+    private const OPERATIONAL_EXAM_STATUSES = ['published', 'ongoing', 'completed'];
+
+    private function questionOperationallyComposed(int $questionId): bool
+    {
+        return ExamQuestion::where('question_id', $questionId)
+            ->whereHas('exam', fn ($q) => $q->whereIn('status', self::OPERATIONAL_EXAM_STATUSES))
+            ->exists();
+    }
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -132,6 +145,16 @@ class QuestionController extends Controller
             ], 404);
         }
 
+        // B21-03: a question composed into a published/ongoing/completed exam is
+        // part of that exam's live definition and may not be mutated.
+        if ($this->questionOperationallyComposed($question->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Question is composed into an operational exam and cannot be modified.',
+                'data' => null,
+            ], 422);
+        }
+
         $validated = $request->validated();
         $options = $validated['options'] ?? null;
         unset($validated['options']);
@@ -173,6 +196,16 @@ class QuestionController extends Controller
                 'message' => 'Question not found',
                 'data' => null,
             ], 404);
+        }
+
+        // B21-03: same protection as update — a question composed into a
+        // published/ongoing/completed exam cannot be deleted.
+        if ($this->questionOperationallyComposed($question->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Question is composed into an operational exam and cannot be deleted.',
+                'data' => null,
+            ], 422);
         }
 
         $question->delete();

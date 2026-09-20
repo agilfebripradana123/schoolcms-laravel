@@ -15,6 +15,7 @@ use App\Models\Examination\QuestionOption;
 use App\Models\Staff\Teacher;
 use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Student;
+use App\Models\System\Permission;
 use App\Models\System\Role;
 use App\Models\System\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -317,6 +318,12 @@ class ExamScoringAndEssayGradingTest extends TestCase
         $this->studentA = Student::create(['user_id' => $userA->id, 'name' => 'Siswa A', 'nis' => 'A01']);
         $this->studentB = Student::create(['user_id' => $userB->id, 'name' => 'Siswa B', 'nis' => 'A02']);
 
+        // B21-01: essay grading and grade-sync are write operations gated by the
+        // manage-exam-results permission (Guru default grants view-exam-results only).
+        $manageExamResults = Permission::create(['name' => 'manage-exam-results']);
+        $teacherAUser->permissions()->attach($manageExamResults->id);
+        $teacherBUser->permissions()->attach($manageExamResults->id);
+
         $mtk = Subject::create(['code' => 'MTK', 'name' => 'Matematika']);
         $ipa = Subject::create(['code' => 'IPA', 'name' => 'IPA']);
 
@@ -413,6 +420,22 @@ class ExamScoringAndEssayGradingTest extends TestCase
         Sanctum::actingAs($teacher);
 
         return $this->getJson("/api/teacher/exam-grading/attempts/{$attemptId}");
+    }
+
+    private function makeGradingTeacher(string $label, QuestionBank $inSubject): User
+    {
+        $roleGuru = Role::where('name', 'Guru')->firstOrFail();
+        $user = User::create(['name' => $label, 'email' => $label.'@h.test', 'username' => $label, 'password' => 'x', 'role_id' => $roleGuru->id]);
+        $teacher = Teacher::create(['user_id' => $user->id, 'full_name' => $label]);
+        $year = \App\Models\Academic\AcademicYear::firstOrFail();
+        TeacherAssignment::create([
+            'teacher_id' => $teacher->id,
+            'class_id' => 1,
+            'subject_id' => $inSubject->subject_id,
+            'academic_year_id' => $year->id,
+        ]);
+
+        return $user;
     }
 
     // -----------------------------------------------------------------
@@ -594,6 +617,49 @@ class ExamScoringAndEssayGradingTest extends TestCase
 
         // Teacher B only teaches IPA -> grading the MTK essay is 404 (no IDOR leak).
         $this->gradeAs($this->teacherB, $answerId, ['score' => 5])->assertStatus(404);
+    }
+
+    public function test_view_only_teacher_cannot_grade_but_keeps_read_access(): void
+    {
+        // B21-01: a Guru with only default view-exam-results may read grading
+        // data but the essay-grade write is denied (403) — write requires
+        // manage-exam-results.
+        $attemptId = $this->startAs($this->studentA->user, $this->exam->id);
+        $aqEssay = $this->aqFor($attemptId, $this->qEssay->id);
+        $this->answer($attemptId, $aqEssay, null, 'Jawaban');
+        $this->submit($attemptId);
+        $answerId = ExamAnswer::where('exam_attempt_id', $attemptId)->where('attempt_question_id', $aqEssay->id)->first()->id;
+
+        $viewOnly = $this->makeGradingTeacher('Guru View-Only', $this->qEssay);
+
+        $this->gradingShowAs($viewOnly, $attemptId)->assertStatus(200);
+        $this->gradeAs($viewOnly, $answerId, ['score' => 5])->assertStatus(403);
+
+        $answer = ExamAnswer::find($answerId);
+        $this->assertNull($answer->score, 'denied write must not touch the essay answer');
+    }
+
+    public function test_finalized_result_essay_regrade_rejected(): void
+    {
+        // B21-02: a finalized result rejects essay mutation deterministically —
+        // the answer row stays untouched.
+        $attemptId = $this->startAs($this->studentA->user, $this->exam->id);
+        $aqEssay = $this->aqFor($attemptId, $this->qEssay->id);
+        $this->answer($attemptId, $aqEssay, null, 'Jawaban');
+        $this->submit($attemptId);
+        $answerId = ExamAnswer::where('exam_attempt_id', $attemptId)->where('attempt_question_id', $aqEssay->id)->first()->id;
+        $resultId = ExamResult::where('exam_attempt_id', $attemptId)->value('id');
+
+        $this->gradeAs($this->teacherA, $answerId, ['score' => 16])->assertStatus(200);
+
+        ExamResult::where('id', $resultId)->update(['is_final' => true]);
+
+        $this->gradeAs($this->teacherA, $answerId, ['score' => 12])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Result is finalized and cannot be modified.');
+
+        $this->assertSame(16, (int) ExamAnswer::find($answerId)->score, 'rejected regrade leaves the essay score unchanged');
+        $this->assertSame(80.0, (float) ExamResult::find($resultId)->percentage, 'finalized result value unchanged');
     }
 
     public function test_teacher_grades_within_own_exam_scope(): void

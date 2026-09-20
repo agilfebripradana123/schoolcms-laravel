@@ -22,6 +22,7 @@ use App\Models\Staff\Teacher;
 use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Student;
 use App\Models\System\AuditLog;
+use App\Models\System\Permission;
 use App\Models\System\Role;
 use App\Models\System\User;
 use App\Services\Examination\ExamScoringService;
@@ -367,6 +368,10 @@ class ExamResultFinalizationTest extends TestCase
 
         $this->teacherA = $teacherAUser;
         $this->studentA = Student::create(['user_id' => $userA->id, 'name' => 'Siswa A', 'nis' => 'A01']);
+
+        // B21-01: essay regrade is a write operation requiring manage-exam-results.
+        $manageExamResults = Permission::create(['name' => 'manage-exam-results']);
+        $teacherAUser->permissions()->attach($manageExamResults->id);
 
         $this->ay = AcademicYear::create(['name' => '2025/2026', 'is_active' => true]);
         $this->semester = Semester::create(['academic_year_id' => $this->ay->id, 'name' => '1', 'is_active' => true]);
