@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             AppearanceSeeder::class,
             AcademicOutcomePolicySeeder::class,
+            AcademicDummySeeder::class,
         ]);
 
         User::firstOrCreate(
