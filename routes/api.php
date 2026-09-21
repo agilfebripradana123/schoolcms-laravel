@@ -390,6 +390,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // QUESTION BANKS
     // =========================
     Route::get('/questions', [QuestionController::class, 'index'])->middleware('permission:manage-exams');
+    Route::get('/questions/import/template', [QuestionController::class, 'importTemplate'])->middleware('permission:manage-exams');
+    Route::post('/questions/import/preview', [QuestionController::class, 'importPreview'])->middleware('permission:manage-exams');
+    Route::post('/questions/import', [QuestionController::class, 'import'])->middleware('permission:manage-exams');
     Route::get('/questions/{id}', [QuestionController::class, 'show'])->middleware('permission:manage-exams');
 
     Route::middleware('role:Admin,Administrator')->group(function () {

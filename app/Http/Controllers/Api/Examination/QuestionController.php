@@ -3,14 +3,18 @@
 namespace App\Http\Controllers\Api\Examination;
 
 use App\Http\Controllers\Controller;
+use App\Exports\QuestionImportTemplateExport;
+use App\Http\Requests\Api\Examination\QuestionImportRequest;
 use App\Http\Requests\Api\Examination\StoreQuestionRequest;
 use App\Http\Requests\Api\Examination\UpdateQuestionRequest;
 use App\Http\Resources\Examination\QuestionBankResource;
 use App\Models\Examination\ExamQuestion;
 use App\Models\Examination\QuestionBank;
+use App\Services\Examination\QuestionImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
 
 class QuestionController extends Controller
 {
@@ -93,6 +97,84 @@ class QuestionController extends Controller
             'success' => true,
             'message' => 'Question retrieved successfully',
             'data' => new QuestionBankResource($question),
+        ]);
+    }
+
+    /**
+     * Download the XLSX import template (headers + one example per type).
+     */
+    public function importTemplate()
+    {
+        return Excel::download(new QuestionImportTemplateExport(), 'question-bank-import-template.xlsx');
+    }
+
+    /**
+     * Parse + validate an uploaded XLSX without writing anything.
+     */
+    public function importPreview(QuestionImportRequest $request, QuestionImportService $service): JsonResponse
+    {
+        $result = $service->preview($request->file('file'));
+
+        if (! $result['valid']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['message'],
+                'data' => [
+                    'total_rows' => $result['total_rows'],
+                    'valid_rows' => $result['valid_rows'],
+                    'invalid_rows' => $result['invalid_rows'],
+                    'errors' => $result['errors'],
+                    'preview' => [],
+                ],
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $result['message'],
+            'data' => [
+                'total_rows' => $result['total_rows'],
+                'valid_rows' => $result['valid_rows'],
+                'invalid_rows' => $result['invalid_rows'],
+                'errors' => [],
+                'preview' => $result['preview'],
+            ],
+        ]);
+    }
+
+    /**
+     * Execute the import atomically. Any invalid row rejects the whole file;
+     * valid files create all rows inside one transaction as `draft`.
+     */
+    public function import(QuestionImportRequest $request, QuestionImportService $service): JsonResponse
+    {
+        $result = $service->import(
+            $request->file('file'),
+            (int) $request->input('subject_id'),
+            $request->user()?->id
+        );
+
+        if (! $result['valid']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['message'],
+                'data' => [
+                    'imported_count' => 0,
+                    'total_rows' => $result['total_rows'],
+                    'valid_rows' => $result['valid_rows'],
+                    'invalid_rows' => $result['invalid_rows'],
+                    'errors' => $result['errors'],
+                ],
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $result['message'],
+            'data' => [
+                'imported_count' => $result['imported_count'],
+                'question_ids' => $result['question_ids'],
+            ],
         ]);
     }
 
