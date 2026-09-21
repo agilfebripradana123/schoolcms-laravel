@@ -10,7 +10,11 @@ return new class extends Migration
     {
         Schema::create('backup_logs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->unsignedInteger('user_id')->nullable();
+            $table->foreign('user_id')
+                ->references('id')
+                ->on('users')
+                ->nullOnDelete();
             $table->string('status'); // success, failed, running
             $table->string('file_path')->nullable();
             $table->unsignedBigInteger('file_size')->nullable(); // bytes
