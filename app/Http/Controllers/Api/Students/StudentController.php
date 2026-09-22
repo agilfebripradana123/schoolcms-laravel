@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Api\Students;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Students\UpdateStudentAccountRequest;
+use App\Http\Requests\Api\Students\UpdateStudentRequest;
 use App\Models\Students\Student;
+use App\Services\Students\StudentAccountService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class StudentController extends Controller
 {
@@ -14,7 +18,7 @@ class StudentController extends Controller
      */
     public function index()
     {
-        $students = Student::latest()->get();
+        $students = Student::with('user')->latest()->get();
 
         return response()->json([
             'message' => 'Data siswa berhasil diambil.',
@@ -72,8 +76,11 @@ class StudentController extends Controller
     /**
      * Mengubah data siswa.
      */
-    public function update(Request $request, $id)
-    {
+    public function update(
+        UpdateStudentRequest $request,
+        $id,
+        StudentAccountService $accountService
+    ) {
         $student = Student::find($id);
 
         if (!$student) {
@@ -82,35 +89,22 @@ class StudentController extends Controller
             ], 404);
         }
 
-        $validated = $request->validate([
-            'user_id' => ['nullable', 'integer'],
-            'class_id' => ['nullable', 'integer'],
-            'nisn' => [
-                'required',
-                'string',
-                'max:20',
-                'unique:students,nisn,' . $student->id,
-            ],
-            'nis' => [
-                'required',
-                'string',
-                'max:20',
-                'unique:students,nis,' . $student->id,
-            ],
-            'name' => ['required', 'string', 'max:100'],
-            'gender' => ['required', 'in:L,P'],
-            'birth_place' => ['required', 'string', 'max:100'],
-            'birth_date' => ['required', 'date'],
-            'address' => ['required', 'string'],
-            'phone' => ['nullable', 'string', 'max:20'],
-            'photo' => ['nullable', 'string', 'max:255'],
-        ]);
+        $validated = $request->validated();
+        $oldNisn = $student->nisn;
 
-        $student->update($validated);
+        DB::transaction(function () use ($student, $validated, $oldNisn, $accountService) {
+            $student->update($validated);
+
+            $newNisn = (string) ($validated['nisn'] ?? $student->nisn);
+
+            if ($newNisn !== $oldNisn) {
+                $accountService->syncNisnUsername($student, $oldNisn, $newNisn);
+            }
+        });
 
         return response()->json([
             'message' => 'Data siswa berhasil diperbarui.',
-            'data' => $student,
+            'data' => $student->load('user'),
         ]);
     }
 
@@ -131,6 +125,62 @@ class StudentController extends Controller
 
         return response()->json([
             'message' => 'Siswa berhasil dihapus.',
+        ]);
+    }
+
+    /**
+     * PUT /api/students/{student}/account
+     * Aktifkan/matikan akun login siswa (provision bila belum ada User).
+     */
+    public function updateAccount(
+        UpdateStudentAccountRequest $request,
+        $id,
+        StudentAccountService $accountService
+    ): JsonResponse {
+        $student = Student::with('user')->find($id);
+
+        if (!$student) {
+            return response()->json([
+                'message' => 'Data siswa tidak ditemukan.',
+            ], 404);
+        }
+
+        $hadUser = $student->user !== null;
+        $isActive = $request->boolean('is_active');
+
+        $student = $accountService->applyStatus(
+            $student,
+            $isActive,
+            $request->input('email'),
+            $request->input('password'),
+            $request->user(),
+            $request->ip(),
+            $request->userAgent()
+        );
+
+        $user = $student->user;
+
+        if ($isActive) {
+            $message = $hadUser
+                ? 'Akun siswa berhasil diaktifkan.'
+                : 'Akun siswa berhasil dibuat dan diaktifkan.';
+        } else {
+            $message = $hadUser
+                ? 'Akun siswa berhasil dinonaktifkan.'
+                : 'Siswa belum memiliki akun login.';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'data' => [
+                'is_active' => $user ? (bool) $user->is_active : false,
+                'user' => $user ? [
+                    'id' => $user->id,
+                    'username' => $user->username,
+                    'email' => $user->email,
+                    'is_active' => (bool) $user->is_active,
+                ] : null,
+            ],
         ]);
     }
 
