@@ -137,8 +137,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // CLASSES
     // =========================
-    Route::get('/classes', [ClassController::class, 'index']);
-    Route::get('/classes/{class}', [ClassController::class, 'show']);
+    Route::get('/classes', [ClassController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/classes/{class}', [ClassController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/classes', [ClassController::class, 'store']);
@@ -151,9 +151,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // TEACHERS
     // =========================
-    Route::get('/teachers', [TeacherController::class, 'index']);
-    Route::get('/teachers/export', [TeacherController::class, 'export']);
-    Route::get('/teachers/{teacher}', [TeacherController::class, 'show']);
+    Route::get('/teachers', [TeacherController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/teachers/export', [TeacherController::class, 'export'])->middleware('role:Admin,Administrator');
+    Route::get('/teachers/{teacher}', [TeacherController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/teachers/import', [TeacherController::class, 'import']);
@@ -167,8 +167,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // STUDENTS
     // =========================
-    Route::get('/students', [StudentController::class, 'index']);
-    Route::get('/students/{student}', [StudentController::class, 'show']);
+    Route::get('/students', [StudentController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/students/{student}', [StudentController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/students', [StudentController::class, 'store']);
@@ -182,8 +182,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // ATTENDANCE (kehadiran siswa)
     // =========================
-    Route::get('/attendance', [AttendanceController::class, 'index']);
-    Route::get('/attendance/{attendance}', [AttendanceController::class, 'show']);
+    Route::get('/attendance', [AttendanceController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/attendance/{attendance}', [AttendanceController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/attendance', [AttendanceController::class, 'store']);
@@ -196,8 +196,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // SUBJECTS
     // =========================
-    Route::get('/subjects', [SubjectController::class, 'index']);
-    Route::get('/subjects/{subject}', [SubjectController::class, 'show']);
+    Route::get('/subjects', [SubjectController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/subjects/{subject}', [SubjectController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/subjects', [SubjectController::class, 'store']);
@@ -210,8 +210,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // CLASS SUBJECTS
     // =========================
-    Route::get('/class-subjects', [ClassSubjectController::class, 'index']);
-    Route::get('/class-subjects/{class_subject}', [ClassSubjectController::class, 'show']);
+    Route::get('/class-subjects', [ClassSubjectController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/class-subjects/{class_subject}', [ClassSubjectController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/class-subjects', [ClassSubjectController::class, 'store']);
@@ -224,8 +224,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // GRADES
     // =========================
-    Route::get('/grades', [GradeController::class, 'index']);
-    Route::get('/grades/{grade}', [GradeController::class, 'show']);
+    Route::get('/grades', [GradeController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/grades/{grade}', [GradeController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/grades', [GradeController::class, 'store']);
@@ -324,8 +324,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ROLES
     // =========================
-    Route::get('/roles', [RoleController::class, 'index']);
-    Route::get('/roles/{role}', [RoleController::class, 'show']);
+    Route::get('/roles', [RoleController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/roles/{role}', [RoleController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/roles', [RoleController::class, 'store']);
@@ -339,15 +339,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // PERMISSIONS (read-only — system-defined catalog)
     // =========================
-    Route::get('/permissions', [PermissionController::class, 'index']);
-    Route::get('/permissions/{permission}', [PermissionController::class, 'show']);
+    Route::get('/permissions', [PermissionController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/permissions/{permission}', [PermissionController::class, 'show'])->middleware('role:Admin,Administrator');
 
 
     // =========================
     // USERS MANAGEMENT
     // =========================
-    Route::get('/users', [UserController::class, 'index']);
-    Route::get('/users/{user}', [UserController::class, 'show']);
+    Route::get('/users', [UserController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/users/{user}', [UserController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/users', [UserController::class, 'store']);
@@ -501,8 +501,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // ACADEMIC YEARS
     // =========================
-    Route::get('/academic-years', [AcademicYearController::class, 'index']);
-    Route::get('/academic-years/{academic_year}', [AcademicYearController::class, 'show']);
+    Route::get('/academic-years', [AcademicYearController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/academic-years/{academic_year}', [AcademicYearController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/academic-years', [AcademicYearController::class, 'store']);
@@ -573,8 +573,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // SEMESTERS
     // =========================
-    Route::get('/semesters', [SemesterController::class, 'index']);
-    Route::get('/semesters/{semester}', [SemesterController::class, 'show']);
+    Route::get('/semesters', [SemesterController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/semesters/{semester}', [SemesterController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/semesters', [SemesterController::class, 'store']);
@@ -587,8 +587,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // CURRICULUMS
     // =========================
-    Route::get('/curriculums', [CurriculumController::class, 'index']);
-    Route::get('/curriculums/{curriculum}', [CurriculumController::class, 'show']);
+    Route::get('/curriculums', [CurriculumController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/curriculums/{curriculum}', [CurriculumController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/curriculums', [CurriculumController::class, 'store']);
@@ -601,8 +601,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // CLASS STUDENTS
     // =========================
-    Route::get('/class-students', [ClassStudentController::class, 'index']);
-    Route::get('/class-students/{class_student}', [ClassStudentController::class, 'show']);
+    Route::get('/class-students', [ClassStudentController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/class-students/{class_student}', [ClassStudentController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/class-students', [ClassStudentController::class, 'store']);
@@ -615,8 +615,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // TEACHER ASSIGNMENTS
     // =========================
-    Route::get('/teacher-assignments', [TeacherAssignmentController::class, 'index']);
-    Route::get('/teacher-assignments/{teacher_assignment}', [TeacherAssignmentController::class, 'show']);
+    Route::get('/teacher-assignments', [TeacherAssignmentController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/teacher-assignments/{teacher_assignment}', [TeacherAssignmentController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/teacher-assignments', [TeacherAssignmentController::class, 'store']);
@@ -629,8 +629,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // SCHEDULES
     // =========================
-    Route::get('/schedules', [ScheduleController::class, 'index']);
-    Route::get('/schedules/{schedule}', [ScheduleController::class, 'show']);
+    Route::get('/schedules', [ScheduleController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/schedules/{schedule}', [ScheduleController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/schedules', [ScheduleController::class, 'store']);
@@ -643,8 +643,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // PERIODS
     // =========================
-    Route::get('/periods', [PeriodController::class, 'index']);
-    Route::get('/periods/{period}', [PeriodController::class, 'show']);
+    Route::get('/periods', [PeriodController::class, 'index'])->middleware('role:Admin,Administrator,Guru');
+    Route::get('/periods/{period}', [PeriodController::class, 'show'])->middleware('role:Admin,Administrator,Guru');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/periods', [PeriodController::class, 'store']);
@@ -657,8 +657,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // ASSIGNMENTS
     // =========================
-    Route::get('/assignments', [AssignmentController::class, 'index']);
-    Route::get('/assignments/{assignment}', [AssignmentController::class, 'show']);
+    Route::get('/assignments', [AssignmentController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/assignments/{assignment}', [AssignmentController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/assignments', [AssignmentController::class, 'store']);
@@ -671,8 +671,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // REPORT CARDS
     // =========================
-    Route::get('/report-cards', [ReportCardController::class, 'index']);
-    Route::get('/report-cards/{report_card}', [ReportCardController::class, 'show']);
+    Route::get('/report-cards', [ReportCardController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/report-cards/{report_card}', [ReportCardController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/report-cards', [ReportCardController::class, 'store']);
@@ -717,8 +717,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // PARENTS (data orang tua)
     // =========================
-    Route::get('/parents', [StudentParentController::class, 'index']);
-    Route::get('/parents/{parent}', [StudentParentController::class, 'show']);
+    Route::get('/parents', [StudentParentController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/parents/{parent}', [StudentParentController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/parents', [StudentParentController::class, 'store']);
@@ -731,8 +731,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // GUARDIANS (wali)
     // =========================
-    Route::get('/guardians', [GuardianController::class, 'index']);
-    Route::get('/guardians/{guardian}', [GuardianController::class, 'show']);
+    Route::get('/guardians', [GuardianController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/guardians/{guardian}', [GuardianController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/guardians', [GuardianController::class, 'store']);
@@ -745,8 +745,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // STUDENT HISTORIES
     // =========================
-    Route::get('/student-histories', [StudentHistoryController::class, 'index']);
-    Route::get('/student-histories/{student_history}', [StudentHistoryController::class, 'show']);
+    Route::get('/student-histories', [StudentHistoryController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/student-histories/{student_history}', [StudentHistoryController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/student-histories', [StudentHistoryController::class, 'store']);
@@ -760,8 +760,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // ACHIEVEMENTS (prestasi)
     // =========================
-    Route::get('/achievements', [AchievementController::class, 'index']);
-    Route::get('/achievements/{achievement}', [AchievementController::class, 'show']);
+    Route::get('/achievements', [AchievementController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/achievements/{achievement}', [AchievementController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/achievements', [AchievementController::class, 'store']);
@@ -774,8 +774,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // VIOLATIONS (pelanggaran)
     // =========================
-    Route::get('/violations', [ViolationController::class, 'index']);
-    Route::get('/violations/{violation}', [ViolationController::class, 'show']);
+    Route::get('/violations', [ViolationController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/violations/{violation}', [ViolationController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/violations', [ViolationController::class, 'store']);
@@ -788,8 +788,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // SCHOLARSHIPS (beasiswa)
     // =========================
-    Route::get('/scholarships', [ScholarshipController::class, 'index']);
-    Route::get('/scholarships/{scholarship}', [ScholarshipController::class, 'show']);
+    Route::get('/scholarships', [ScholarshipController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/scholarships/{scholarship}', [ScholarshipController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/scholarships', [ScholarshipController::class, 'store']);
@@ -802,8 +802,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // TRANSFERS (mutasi)
     // =========================
-    Route::get('/transfers', [TransferController::class, 'index']);
-    Route::get('/transfers/{transfer}', [TransferController::class, 'show']);
+    Route::get('/transfers', [TransferController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/transfers/{transfer}', [TransferController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/transfers', [TransferController::class, 'store']);
@@ -816,8 +816,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // ALUMNI
     // =========================
-    Route::get('/alumni', [AlumniController::class, 'index']);
-    Route::get('/alumni/{alumni}', [AlumniController::class, 'show']);
+    Route::get('/alumni', [AlumniController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/alumni/{alumni}', [AlumniController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/alumni', [AlumniController::class, 'store']);
@@ -830,8 +830,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // STUDENT ID CARDS (kartu pelajar)
     // =========================
-    Route::get('/student-id-cards', [StudentIdCardController::class, 'index']);
-    Route::get('/student-id-cards/{student_id_card}', [StudentIdCardController::class, 'show']);
+    Route::get('/student-id-cards', [StudentIdCardController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/student-id-cards/{student_id_card}', [StudentIdCardController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/student-id-cards', [StudentIdCardController::class, 'store']);
@@ -844,8 +844,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // STAFF (tenaga kependidikan)
     // =========================
-    Route::get('/staff', [StaffController::class, 'index']);
-    Route::get('/staff/{staff}', [StaffController::class, 'show']);
+    Route::get('/staff', [StaffController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/staff/{staff}', [StaffController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/staff', [StaffController::class, 'store']);
@@ -858,8 +858,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // TEACHER ATTENDANCE (kehadiran guru)
     // =========================
-    Route::get('/teacher-attendances', [TeacherAttendanceController::class, 'index']);
-    Route::get('/teacher-attendances/{teacher_attendance}', [TeacherAttendanceController::class, 'show']);
+    Route::get('/teacher-attendances', [TeacherAttendanceController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/teacher-attendances/{teacher_attendance}', [TeacherAttendanceController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/teacher-attendances', [TeacherAttendanceController::class, 'store']);
@@ -872,8 +872,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // TEACHER LEAVE (cuti guru)
     // =========================
-    Route::get('/teacher-leaves', [TeacherLeaveController::class, 'index']);
-    Route::get('/teacher-leaves/{teacher_leave}', [TeacherLeaveController::class, 'show']);
+    Route::get('/teacher-leaves', [TeacherLeaveController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/teacher-leaves/{teacher_leave}', [TeacherLeaveController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/teacher-leaves', [TeacherLeaveController::class, 'store']);
@@ -886,8 +886,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // TEACHER DOCUMENTS (dokumen guru)
     // =========================
-    Route::get('/teacher-documents', [TeacherDocumentController::class, 'index']);
-    Route::get('/teacher-documents/{teacher_document}', [TeacherDocumentController::class, 'show']);
+    Route::get('/teacher-documents', [TeacherDocumentController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/teacher-documents/{teacher_document}', [TeacherDocumentController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/teacher-documents', [TeacherDocumentController::class, 'store']);
@@ -904,8 +904,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/notifications/read-all', [UserNotificationController::class, 'markAllAsRead']);
     Route::get('/notifications/unread-count', [UserNotificationController::class, 'unreadCount']);
     Route::put('/notifications/{notification}/read', [UserNotificationController::class, 'markAsRead']);
-    Route::get('/notifications', [UserNotificationController::class, 'index']);
-    Route::get('/notifications/{notification}', [UserNotificationController::class, 'show']);
+    Route::get('/notifications', [UserNotificationController::class, 'index'])->middleware('role:Admin,Administrator');
+    Route::get('/notifications/{notification}', [UserNotificationController::class, 'show'])->middleware('role:Admin,Administrator');
 
     Route::middleware('role:Admin,Administrator')->group(function () {
         Route::post('/notifications', [UserNotificationController::class, 'store']);
@@ -1030,7 +1030,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // =========================
     // REPORTS (read-only agregasi)
     // =========================
-    Route::prefix('reports')->group(function () {
+    Route::middleware('role:Admin,Administrator')->prefix('reports')->group(function () {
         Route::get('/academic/grades-summary', [AcademicReportController::class, 'gradesSummary']);
         Route::get('/students/summary', [StudentReportController::class, 'summary']);
         Route::get('/teachers/summary', [TeacherReportController::class, 'summary']);

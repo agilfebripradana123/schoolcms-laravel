@@ -22,32 +22,6 @@ return new class extends Migration
 -- These are referenced by academic, student, and other modules.
 -- =====================================================================
 
--- 1) STUDENTS (core entity)
-CREATE TABLE IF NOT EXISTS `students` (
-  `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` INT(10) UNSIGNED DEFAULT NULL,
-  `class_id` INT(10) UNSIGNED DEFAULT NULL,
-  `nisn` VARCHAR(20) NOT NULL,
-  `nis` VARCHAR(20) NOT NULL,
-  `name` VARCHAR(100) NOT NULL,
-  `gender` ENUM('L','P') NOT NULL,
-  `birth_place` VARCHAR(100) NOT NULL,
-  `birth_date` DATE NOT NULL,
-  `address` TEXT NOT NULL,
-  `phone` VARCHAR(20) DEFAULT NULL,
-  `photo` VARCHAR(255) DEFAULT NULL,
-  `created_at` DATETIME DEFAULT NULL,
-  `updated_at` DATETIME DEFAULT NULL,
-  `deleted_at` DATETIME DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `students_nisn_unique` (`nisn`),
-  UNIQUE KEY `students_nis_unique` (`nis`),
-  KEY `students_user_id_foreign` (`user_id`),
-  KEY `students_class_id_foreign` (`class_id`),
-  CONSTRAINT `students_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL,
-  CONSTRAINT `students_class_id_foreign` FOREIGN KEY (`class_id`) REFERENCES `classes` (`id`) ON DELETE CASCADE ON UPDATE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
 -- 2) CLASSES
 CREATE TABLE IF NOT EXISTS `classes` (
   `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -115,11 +89,44 @@ CREATE TABLE IF NOT EXISTS `teachers` (
 ALTER TABLE `classes` ADD CONSTRAINT `classes_teacher_id_foreign` 
   FOREIGN KEY (`teacher_id`) REFERENCES `teachers` (`id`) ON DELETE SET NULL;
 
+-- 1) STUDENTS (core entity)
+CREATE TABLE IF NOT EXISTS `students` (
+  `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT(10) UNSIGNED DEFAULT NULL,
+  `class_id` INT(10) UNSIGNED DEFAULT NULL,
+  `nisn` VARCHAR(20) NOT NULL,
+  `nis` VARCHAR(20) NOT NULL,
+  `name` VARCHAR(100) NOT NULL,
+  `gender` ENUM('L','P') NOT NULL,
+  `birth_place` VARCHAR(100) NOT NULL,
+  `birth_date` DATE NOT NULL,
+  `address` TEXT NOT NULL,
+  `phone` VARCHAR(20) DEFAULT NULL,
+  `photo` VARCHAR(255) DEFAULT NULL,
+  `created_at` DATETIME DEFAULT NULL,
+  `updated_at` DATETIME DEFAULT NULL,
+  `deleted_at` DATETIME DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `students_nisn_unique` (`nisn`),
+  UNIQUE KEY `students_nis_unique` (`nis`),
+  KEY `students_user_id_foreign` (`user_id`),
+  KEY `students_class_id_foreign` (`class_id`),
+  CONSTRAINT `students_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL,
+  CONSTRAINT `students_class_id_foreign` FOREIGN KEY (`class_id`) REFERENCES `classes` (`id`) ON DELETE CASCADE ON UPDATE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 SQL;
 
+        $lines = array_filter(
+            preg_split('/[\r\n]+/', $sql),
+            fn ($l) => trim($l) !== '' && !preg_match('/^--/', trim($l))
+        );
+
+        $clean = implode("\n", $lines);
+
         $statements = array_filter(
-            array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)),
-            fn ($s) => $s !== '' && !preg_match('/^--/', $s)
+            array_map('trim', preg_split('/;\s*[\r\n]+/', $clean)),
+            fn ($s) => $s !== ''
         );
         
         foreach ($statements as $statement) {

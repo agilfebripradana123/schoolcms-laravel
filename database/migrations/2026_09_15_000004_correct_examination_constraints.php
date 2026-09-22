@@ -111,14 +111,14 @@ return new class extends Migration
 
     private function fixExamResultsUnique(): void
     {
-        // The UNIQUE(participant_id) doubles as the FK index for
-        // `exam_results_participant_id_foreign`; MySQL 1553 prevents dropping
-        // the unique while the FK references it. Order: drop FK -> drop unique
-        // -> add plain index -> re-add FK (preserving original cascade).
-        $hasFk = $this->foreignKeyExists('exam_results', 'exam_results_participant_id_foreign');
-        if ($hasFk) {
-            Schema::table('exam_results', function (Blueprint $t) {
-                $t->dropForeign('exam_results_participant_id_foreign');
+        // The UNIQUE(participant_id) doubles as the FK index for the
+        // participant FK; MySQL 1553 prevents dropping the unique while the
+        // FK references it. Order: drop FK -> drop unique -> add plain index
+        // -> re-add FK (preserving original cascade).
+        $fkNames = $this->foreignKeysOnColumn('exam_results', 'participant_id');
+        foreach ($fkNames as $fkName) {
+            Schema::table('exam_results', function (Blueprint $t) use ($fkName) {
+                $t->dropForeign($fkName);
             });
         }
 
@@ -137,9 +137,9 @@ return new class extends Migration
             });
         }
 
-        if ($hasFk) {
-            Schema::table('exam_results', function (Blueprint $t) {
-                $t->foreign('participant_id', 'exam_results_participant_id_foreign')
+        foreach ($fkNames as $fkName) {
+            Schema::table('exam_results', function (Blueprint $t) use ($fkName) {
+                $t->foreign('participant_id', $fkName)
                     ->references('id')->on('exam_participants')->onDelete('cascade');
             });
         }
@@ -294,13 +294,16 @@ return new class extends Migration
         }
     }
 
-    private function foreignKeyExists(string $table, string $constraint): bool
+    private function foreignKeysOnColumn(string $table, string $column): array
     {
-        return DB::table('information_schema.table_constraints')
-            ->where('constraint_schema', DB::connection()->getDatabaseName())
-            ->where('table_name', $table)
-            ->where('constraint_name', $constraint)
-            ->where('constraint_type', 'FOREIGN KEY')
-            ->exists();
+        $rows = DB::select(
+            'SELECT CONSTRAINT_NAME AS constraint_name
+             FROM information_schema.key_column_usage
+             WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
+               AND REFERENCED_TABLE_NAME IS NOT NULL',
+            [DB::connection()->getDatabaseName(), $table, $column]
+        );
+
+        return array_values(array_unique(array_map(fn ($row) => (string) $row->constraint_name, $rows)));
     }
 };
