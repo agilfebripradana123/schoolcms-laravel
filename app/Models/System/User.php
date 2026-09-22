@@ -44,6 +44,28 @@ class User extends Authenticatable
         'view-counselings',
     ];
 
+    /**
+     * Default read-only capabilities granted to every user with the `Siswa`
+     * role. These mirror the Portal Siswa sidebar submenus (Akademik,
+     * Keuangan, Aktivitas) so students always see their menu regardless of
+     * seeding state. Mirrors the Guru default pattern above.
+     */
+    public const SISWA_DEFAULT_PERMISSIONS = [
+        'view-grades',
+        'view-schedules',
+        'view-attendance',
+        'view-assignments',
+        'view-exams',
+        'view-finance',
+        'view-billings',
+        'view-payments',
+        'view-transactions',
+        'view-scholarships',
+        'view-achievements',
+        'view-violations',
+        'view-extracurricular',
+    ];
+
     protected $table = 'users';
 
     protected $fillable = [
@@ -106,7 +128,8 @@ class User extends Authenticatable
      * Effective permission names = role permissions UNION user additional
      * permissions (deduplicated). Requires `role.permissions` and `permissions`
      * relations to be loaded, otherwise they are fetched. Users with the `Guru`
-     * role also receive the default Guru read capabilities.
+     * role also receive the default Guru read capabilities, and users with the
+     * `Siswa` role receive the default Siswa read capabilities.
      */
     public function effectivePermissions(): array
     {
@@ -119,6 +142,10 @@ class User extends Authenticatable
 
         if (strtolower((string) $this->role?->name) === 'guru') {
             $effective = array_merge($effective, self::GURU_DEFAULT_PERMISSIONS);
+        }
+
+        if (strtolower((string) $this->role?->name) === 'siswa') {
+            $effective = array_merge($effective, self::SISWA_DEFAULT_PERMISSIONS);
         }
 
         return array_values(array_unique($effective));

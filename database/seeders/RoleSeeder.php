@@ -42,14 +42,8 @@ class RoleSeeder extends Seeder
             $guruRole->permissions()->sync($guruPermissionIds);
         }
 
-        // Siswa read-only permissions
-        $siswaDefaultNames = [
-            'view-grades', 'view-schedules', 'view-attendance',
-            'view-assignments', 'view-exams', 'view-finance',
-            'view-billings', 'view-payments', 'view-transactions',
-            'view-scholarships', 'view-achievements', 'view-violations',
-            'view-extracurricular',
-        ];
+        // Siswa read-only permissions from User::SISWA_DEFAULT_PERMISSIONS
+        $siswaDefaultNames = \App\Models\System\User::SISWA_DEFAULT_PERMISSIONS;
         $siswaPermissionIds = Permission::whereIn('name', $siswaDefaultNames)->pluck('id')->all();
         $siswaRole = Role::where('name', 'Siswa')->first();
         if ($siswaRole) {
