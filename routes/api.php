@@ -1293,7 +1293,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/reports/students', [StudentReportController::class, 'index']);
             Route::get('/reports/teachers', [TeacherReportController::class, 'index']);
             Route::get('/reports/finance', [FinancialReportController::class, 'index']);
-            Route::get('/reports/attendance', [AttendanceReportController::class, 'index']);
             Route::get('/reports/inventory', [InventoryReportController::class, 'index']);
         });
 

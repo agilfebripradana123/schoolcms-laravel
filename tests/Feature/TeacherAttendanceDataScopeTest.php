@@ -33,6 +33,17 @@ class TeacherAttendanceDataScopeTest extends TestCase
 
     private function buildSchema(): void
     {
+        Schema::create('audit_logs', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedInteger('user_id')->nullable();
+            $t->string('action', 50);
+            $t->string('model', 100)->nullable();
+            $t->unsignedInteger('model_id')->nullable();
+            $t->text('description');
+            $t->string('ip_address', 45);
+            $t->string('user_agent', 255)->nullable();
+            $t->timestamp('created_at')->nullable();
+        });
         Schema::create('roles', function (Blueprint $t) {
             $t->id();
             $t->string('name')->unique();
@@ -139,10 +150,12 @@ class TeacherAttendanceDataScopeTest extends TestCase
             $t->id();
             $t->unsignedBigInteger('student_id');
             $t->unsignedBigInteger('class_id');
+            $t->unsignedBigInteger('academic_year_id');
             $t->date('date');
             $t->string('status');
             $t->string('note')->nullable();
             $t->timestamps();
+            $t->index('academic_year_id');
         });
     }
 
@@ -176,8 +189,8 @@ class TeacherAttendanceDataScopeTest extends TestCase
         ClassStudent::create(['class_id' => $classB->id, 'student_id' => $studentB->id, 'academic_year_id' => $year->id]);
 
         // Kehadiran: Guru A punya attendance utk Ahmad (class A), Guru B utk Citra (class B).
-        Attendance::create(['student_id' => $studentA1->id, 'class_id' => $classA->id, 'date' => '2026-09-01', 'status' => 'hadir']);
-        Attendance::create(['student_id' => $studentB->id, 'class_id' => $classB->id, 'date' => '2026-09-01', 'status' => 'sakit']);
+        Attendance::create(['student_id' => $studentA1->id, 'class_id' => $classA->id, 'academic_year_id' => $year->id, 'date' => '2026-09-01', 'status' => 'hadir']);
+        Attendance::create(['student_id' => $studentB->id, 'class_id' => $classB->id, 'academic_year_id' => $year->id, 'date' => '2026-09-01', 'status' => 'sakit']);
 
         $this->guruA = $guruA;
         $this->guruB = $guruB;

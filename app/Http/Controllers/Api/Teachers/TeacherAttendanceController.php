@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Teachers;
 
 use App\Http\Controllers\Controller;
+use App\Models\Academic\AcademicYear;
 use App\Models\Academic\ClassStudent;
 use App\Models\Staff\TeacherAssignment;
 use App\Models\Students\Attendance;
@@ -18,6 +19,12 @@ use Illuminate\Validation\Rule;
  * -> authorized class. `class_id` dipakai sebagai filter/request, tetapi selalu
  * diverifikasi ada dalam scope Guru (bukan hanya penentu authorization).
  * `teacher_id` dari client tidak pernah digunakan.
+ *
+ * Academic context (academic_year_id) is server-authoritative: it is part of
+ * every teacher read/write and is resolved from the active academic year when
+ * the client omits it (cf. TeacherGradeController). The lookup/update identity
+ * therefore includes the year, so a teacher can never overwrite a record that
+ * belongs to another academic year.
  */
 class TeacherAttendanceController extends Controller
 {
@@ -26,16 +33,18 @@ class TeacherAttendanceController extends Controller
         return $request->user()?->teacherProfile;
     }
 
-    private function className($teacher, int $classId)
+    private function className($teacher, int $classId, int $academicYearId)
     {
         return TeacherAssignment::where('teacher_id', $teacher->id)
             ->where('class_id', $classId)
+            ->where('academic_year_id', $academicYearId)
             ->exists();
     }
 
     /**
-     * GET /api/teacher/attendance?date=Y-m-d&class_id=ID
-     * Roster siswa aktif di kelas (dalam scope guru) + status kehadiran pada tanggal tsb.
+     * GET /api/teacher/attendance?date=Y-m-d&class_id=ID[&academic_year_id=ID]
+     * Roster siswa aktif di kelas (dalam scope guru, untuk tahun ajaran terpilih)
+     * + status kehadiran pada tanggal tsb.
      */
     public function roster(Request $request): JsonResponse
     {
@@ -48,12 +57,16 @@ class TeacherAttendanceController extends Controller
         $validated = $request->validate([
             'date' => ['required', 'date'],
             'class_id' => ['required', 'integer'],
+            'academic_year_id' => ['nullable', 'integer', 'exists:academic_years,id'],
         ]);
 
         $classId = (int) $validated['class_id'];
         $date = $validated['date'];
+        $yearId = (int) ($validated['academic_year_id'] ?? AcademicYear::where('is_active', true)
+            ->orderBy('id')
+            ->value('id'));
 
-        if (!$this->className($teacher, $classId)) {
+        if (!$this->className($teacher, $classId, $yearId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Class not found',
@@ -62,6 +75,7 @@ class TeacherAttendanceController extends Controller
         }
 
         $enrollments = ClassStudent::where('class_id', $classId)
+            ->where('academic_year_id', $yearId)
             ->where('status', 'active')
             ->whereHas('student')
             ->with('student')
@@ -70,6 +84,7 @@ class TeacherAttendanceController extends Controller
         $studentIds = $enrollments->pluck('student_id')->all();
 
         $attendances = Attendance::where('class_id', $classId)
+            ->where('academic_year_id', $yearId)
             ->where('date', $date)
             ->whereIn('student_id', $studentIds)
             ->get()
@@ -95,6 +110,7 @@ class TeacherAttendanceController extends Controller
             'message' => 'Teacher attendance roster retrieved successfully',
             'data' => [
                 'class_id' => $classId,
+                'academic_year_id' => $yearId,
                 'date' => $date,
                 'students' => $students,
             ],
@@ -103,8 +119,9 @@ class TeacherAttendanceController extends Controller
 
     /**
      * POST /api/teacher/attendance
-     * Menyimpan kehadiran massal untuk satu kelas+tanggal (idempotent per
-     * student+class+date). Setiap student_div sudah dicek milik kelas scope.
+     * Menyimpan kehadiran massal untuk satu kelas+tanggal+tahun ajaran
+     * (idempotent per student+class+date+academic_year_id). Setiap student
+     * sudah dicek anggota kelas pada tahun ajaran tsb.
      */
     public function store(Request $request): JsonResponse
     {
@@ -117,6 +134,7 @@ class TeacherAttendanceController extends Controller
         $validated = $request->validate([
             'class_id' => ['required', 'integer'],
             'date' => ['required', 'date'],
+            'academic_year_id' => ['nullable', 'integer', 'exists:academic_years,id'],
             'items' => ['required', 'array', 'min:1', 'max:200'],
             'items.*.student_id' => ['required', 'integer'],
             'items.*.status' => ['required', Rule::in(['hadir', 'sakit', 'izin', 'alpa'])],
@@ -125,8 +143,11 @@ class TeacherAttendanceController extends Controller
 
         $classId = (int) $validated['class_id'];
         $date = $validated['date'];
+        $yearId = (int) ($validated['academic_year_id'] ?? AcademicYear::where('is_active', true)
+            ->orderBy('id')
+            ->value('id'));
 
-        if (!$this->className($teacher, $classId)) {
+        if (!$this->className($teacher, $classId, $yearId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Class not found',
@@ -134,15 +155,17 @@ class TeacherAttendanceController extends Controller
             ], 404);
         }
 
-        // Hanya siswa yang benar-benar aktif di kelas scope dapat diinput.
+        // Hanya siswa yang benar-benar aktif di kelas scope (pada tahun ajaran tsb)
+        // dapat diinput.
         $allowedStudentIds = ClassStudent::where('class_id', $classId)
+            ->where('academic_year_id', $yearId)
             ->where('status', 'active')
             ->pluck('student_id')
             ->all();
 
         $allowedSet = array_flip($allowedStudentIds);
 
-        DB::transaction(function () use ($validated, $classId, $date, $allowedSet) {
+        DB::transaction(function () use ($validated, $classId, $date, $yearId, $allowedSet) {
             foreach ($validated['items'] as $item) {
                 $studentId = (int) $item['student_id'];
 
@@ -155,6 +178,7 @@ class TeacherAttendanceController extends Controller
                         'student_id' => $studentId,
                         'class_id' => $classId,
                         'date' => $date,
+                        'academic_year_id' => $yearId,
                     ],
                     [
                         'status' => $item['status'],

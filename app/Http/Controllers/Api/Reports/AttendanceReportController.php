@@ -3,25 +3,40 @@
 namespace App\Http\Controllers\Api\Reports;
 
 use App\Http\Controllers\Controller;
+use App\Models\Academic\AcademicYear;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class AttendanceReportController extends Controller
 {
-    // attendances table is empty today; these are the assumed status values
-    private const STATUSES = ['hadir', 'sakit', 'izin', 'alfa'];
+    private const STATUSES = ['hadir', 'sakit', 'izin', 'alpa'];
+
+    /**
+     * Resolve the academic year scope: an explicit `academic_year_id` param
+     * wins; otherwise default to the active academic year (server-authoritative,
+     * cf. TeacherGradeController). Reports must not aggregate unrelated years.
+     */
+    private function resolveYearId(\Illuminate\Http\Request $request): int
+    {
+        return (int) ($request->input('academic_year_id') ?? AcademicYear::where('is_active', true)
+            ->orderBy('id')
+            ->value('id'));
+    }
 
     public function daily(\Illuminate\Http\Request $request): JsonResponse
     {
         $validated = $request->validate([
             'date' => 'required|date',
             'class_id' => 'nullable|integer',
+            'academic_year_id' => 'nullable|integer|exists:academic_years,id',
         ]);
 
         $date = $validated['date'];
+        $yearId = $this->resolveYearId($request);
 
         $rows = DB::table('attendances')
             ->leftJoin('classes', 'classes.id', '=', 'attendances.class_id')
+            ->where('attendances.academic_year_id', $yearId)
             ->whereDate('attendances.date', $date)
             ->when(!empty($validated['class_id']), fn ($q) => $q->where('attendances.class_id', $validated['class_id']))
             ->groupBy('attendances.class_id', 'classes.name')
@@ -31,7 +46,7 @@ class AttendanceReportController extends Controller
                 DB::raw("SUM(CASE WHEN attendances.status = 'hadir' THEN 1 ELSE 0 END) AS hadir"),
                 DB::raw("SUM(CASE WHEN attendances.status = 'sakit' THEN 1 ELSE 0 END) AS sakit"),
                 DB::raw("SUM(CASE WHEN attendances.status = 'izin' THEN 1 ELSE 0 END) AS izin"),
-                DB::raw("SUM(CASE WHEN attendances.status = 'alfa' THEN 1 ELSE 0 END) AS alfa"),
+                DB::raw("SUM(CASE WHEN attendances.status = 'alpa' THEN 1 ELSE 0 END) AS alpa"),
                 DB::raw('COUNT(*) AS total'),
             ]);
 
@@ -58,6 +73,7 @@ class AttendanceReportController extends Controller
             'message' => 'Daily attendance report retrieved successfully',
             'data' => [
                 'date' => $date,
+                'academic_year_id' => $yearId,
                 'totals' => $totals,
                 'per_class' => $perClass,
             ],
@@ -70,9 +86,12 @@ class AttendanceReportController extends Controller
             'date_from' => 'nullable|date',
             'date_end' => 'nullable|date',
             'class_id' => 'nullable|integer',
+            'academic_year_id' => 'nullable|integer|exists:academic_years,id',
             'per_page' => 'nullable|integer|min:1|max:100',
             'page' => 'nullable|integer|min:1',
         ]);
+
+        $yearId = $this->resolveYearId($request);
 
         $statusCounts = collect(self::STATUSES)
             ->map(fn ($s) => "SUM(CASE WHEN attendances.status = '{$s}' THEN 1 ELSE 0 END) AS {$s}")
@@ -81,6 +100,7 @@ class AttendanceReportController extends Controller
         $query = DB::table('attendances')
             ->join('students', 'students.id', '=', 'attendances.student_id')
             ->selectRaw("attendances.student_id, students.name AS student_name, COUNT(*) AS total_days, {$statusCounts}")
+            ->where('attendances.academic_year_id', $yearId)
             ->when(!empty($validated['date_from']), fn ($q) => $q->whereDate('attendances.date', '>=', $validated['date_from']))
             ->when(!empty($validated['date_end']), fn ($q) => $q->whereDate('attendances.date', '<=', $validated['date_end']))
             ->when(!empty($validated['class_id']), fn ($q) => $q->where('attendances.class_id', $validated['class_id']))
@@ -98,7 +118,7 @@ class AttendanceReportController extends Controller
                 'hadir' => (int) $row->hadir,
                 'sakit' => (int) $row->sakit,
                 'izin' => (int) $row->izin,
-                'alfa' => (int) $row->alfa,
+                'alpa' => (int) $row->alpa,
                 'attendance_percentage' => round($row->hadir / $totalDays * 100, 1),
             ];
         });
