@@ -40,7 +40,11 @@ class UpdateExamParticipantRequest extends FormRequest
             'schedule_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('exam_schedules', 'id'),
+                $this->input('exam_id')
+                    ? Rule::exists('exam_schedules', 'id')->where(function ($query) {
+                        $query->where('exam_id', $this->input('exam_id'));
+                    })
+                    : Rule::exists('exam_schedules', 'id'),
             ],
             'status' => [
                 'sometimes',

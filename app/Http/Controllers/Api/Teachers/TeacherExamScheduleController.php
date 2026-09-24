@@ -5,29 +5,20 @@ namespace App\Http\Controllers\Api\Teachers;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Examination\ExamScheduleResource;
 use App\Models\Examination\ExamSchedule;
-use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 /**
  * Teacher self-service: Jadwal Ujian (Phase 9).
  *
- * Scope: authenticated user -> teacherProfile -> teacher.id -> TeacherAssignment.subject_id.
- * Jadwal di-scope melalui exam.subject_id milik guru (ExamSchedule.exam.subject_id).
+ * Scope: authenticated user -> teacherProfile -> teacher.id -> TeacherAssignment.
+ * Jadwal di-scope melalui exam milik guru (lihat Exam::scopeTeacherAccessible).
  */
 class TeacherExamScheduleController extends Controller
 {
     private function teacher(Request $request)
     {
         return $request->user()?->teacherProfile;
-    }
-
-    private function subjectIds(int $teacherId): array
-    {
-        return TeacherAssignment::where('teacher_id', $teacherId)
-            ->pluck('subject_id')
-            ->unique()
-            ->all();
     }
 
     private function forbidden(): JsonResponse
@@ -60,12 +51,8 @@ class TeacherExamScheduleController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $query = ExamSchedule::with(['exam', 'room', 'session'])
-            ->whereHas('exam', function ($q) use ($subjectIds) {
-                $q->whereIn('subject_id', $subjectIds);
-            });
+            ->whereHas('exam', fn ($q) => $q->teacherAccessible($teacher->id));
 
         if ($request->filled('exam_id')) {
             $query->where('exam_id', $request->input('exam_id'));
@@ -111,13 +98,9 @@ class TeacherExamScheduleController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $schedule = ExamSchedule::with(['exam', 'room', 'session'])
             ->where('id', $id)
-            ->whereHas('exam', function ($q) use ($subjectIds) {
-                $q->whereIn('subject_id', $subjectIds);
-            })
+            ->whereHas('exam', fn ($q) => $q->teacherAccessible($teacher->id))
             ->first();
 
         if (!$schedule) {

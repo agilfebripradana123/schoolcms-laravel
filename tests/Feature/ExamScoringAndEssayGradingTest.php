@@ -133,6 +133,11 @@ class ExamScoringAndEssayGradingTest extends TestCase
         Schema::create('exams', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id')->nullable();
+            $t->unsignedBigInteger('academic_year_id')->nullable();
+            $t->unsignedBigInteger('semester_id')->nullable();
+            $t->unsignedBigInteger('teacher_id')->nullable();
+            $t->string('exam_type')->nullable();
             $t->string('title');
             $t->unsignedInteger('duration_minutes');
             $t->unsignedInteger('total_questions')->default(0);

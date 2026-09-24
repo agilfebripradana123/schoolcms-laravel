@@ -36,7 +36,11 @@ class UpdateExamRequest extends FormRequest
             'semester_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('semesters', 'id'),
+                $this->input('academic_year_id')
+                    ? Rule::exists('semesters', 'id')->where(function ($query) {
+                        $query->where('academic_year_id', $this->input('academic_year_id'));
+                    })
+                    : Rule::exists('semesters', 'id'),
             ],
             'exam_type' => [
                 'nullable',

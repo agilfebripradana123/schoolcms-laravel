@@ -5,32 +5,23 @@ namespace App\Http\Controllers\Api\Teachers;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Examination\ExamResource;
 use App\Models\Examination\Exam;
-use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 /**
  * Teacher self-service: Ujian (Phase 9).
  *
- * Scope: authenticated user -> teacherProfile -> teacher.id -> TeacherAssignment.subject_id.
- * Exam hanya memiliki subject_id (tanpa class/academic_year), sehingga scope guru
- * ditentukan melalui mata pelajaran yang menjadi lingkup mengajarnya
- * (subject_id milik TeacherAssignment guru tersebut). Client tidak pernah
- * mengirim teacher_id sebagai scope.
+ * Scope: authenticated user -> teacherProfile -> teacher.id -> TeacherAssignment.
+ * Classless exams are scoped by the subject a teacher teaches (subject-only);
+ * class-scoped exams additionally require a TeacherAssignment for that class,
+ * subject and academic year (see Exam::scopeTeacherAccessible). Client never
+ * sends teacher_id as scope.
  */
 class TeacherExamController extends Controller
 {
     private function teacher(Request $request)
     {
         return $request->user()?->teacherProfile;
-    }
-
-    private function subjectIds(int $teacherId): array
-    {
-        return TeacherAssignment::where('teacher_id', $teacherId)
-            ->pluck('subject_id')
-            ->unique()
-            ->all();
     }
 
     private function forbidden(): JsonResponse
@@ -63,9 +54,7 @@ class TeacherExamController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
-        $query = Exam::with('subject')->whereIn('subject_id', $subjectIds);
+        $query = Exam::with('subject')->teacherAccessible($teacher->id);
 
         if ($request->filled('subject_id')) {
             $query->where('subject_id', $request->input('subject_id'));
@@ -111,11 +100,9 @@ class TeacherExamController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $exam = Exam::with('subject')
             ->where('id', $id)
-            ->whereIn('subject_id', $subjectIds)
+            ->teacherAccessible($teacher->id)
             ->first();
 
         if (!$exam) {

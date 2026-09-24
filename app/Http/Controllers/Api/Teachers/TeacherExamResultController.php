@@ -5,30 +5,21 @@ namespace App\Http\Controllers\Api\Teachers;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Examination\ExamResultResource;
 use App\Models\Examination\ExamResult;
-use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 /**
  * Teacher self-service: Hasil Ujian (Phase 9).
  *
- * Scope: authenticated user -> teacherProfile -> teacher.id -> TeacherAssignment.subject_id.
- * Hasil di-scope melalui participant.exam.subject_id milik guru
- * (ExamResult.participant.exam.subject_id).
+ * Scope: authenticated user -> teacherProfile -> teacher.id -> TeacherAssignment.
+ * Hasil di-scope melalui participant.exam milik guru (lihat
+ * Exam::scopeTeacherAccessible).
  */
 class TeacherExamResultController extends Controller
 {
     private function teacher(Request $request)
     {
         return $request->user()?->teacherProfile;
-    }
-
-    private function subjectIds(int $teacherId): array
-    {
-        return TeacherAssignment::where('teacher_id', $teacherId)
-            ->pluck('subject_id')
-            ->unique()
-            ->all();
     }
 
     private function forbidden(): JsonResponse
@@ -61,12 +52,8 @@ class TeacherExamResultController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $query = ExamResult::with(['participant.exam', 'participant.student', 'attempt'])
-            ->whereHas('participant.exam', function ($q) use ($subjectIds) {
-                $q->whereIn('subject_id', $subjectIds);
-            });
+            ->whereHas('participant.exam', fn ($q) => $q->teacherAccessible($teacher->id));
 
         if ($request->filled('participant_id')) {
             $query->where('participant_id', $request->input('participant_id'));
@@ -104,13 +91,9 @@ class TeacherExamResultController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $result = ExamResult::with(['participant.exam', 'participant.student', 'attempt'])
             ->where('id', $id)
-            ->whereHas('participant.exam', function ($q) use ($subjectIds) {
-                $q->whereIn('subject_id', $subjectIds);
-            })
+            ->whereHas('participant.exam', fn ($q) => $q->teacherAccessible($teacher->id))
             ->first();
 
         if (!$result) {

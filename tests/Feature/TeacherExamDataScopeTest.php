@@ -154,6 +154,11 @@ class TeacherExamDataScopeTest extends TestCase
         Schema::create('exams', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('subject_id');
+            $t->unsignedBigInteger('class_id')->nullable();
+            $t->unsignedBigInteger('academic_year_id')->nullable();
+            $t->unsignedBigInteger('semester_id')->nullable();
+            $t->unsignedBigInteger('teacher_id')->nullable();
+            $t->string('exam_type')->nullable();
             $t->string('title');
             $t->text('description')->nullable();
             $t->unsignedInteger('duration_minutes');
@@ -263,6 +268,9 @@ class TeacherExamDataScopeTest extends TestCase
         $this->guruB = $guruB;
         $this->mathId = $math->id;
         $this->indoId = $indo->id;
+        $this->yearId = $year->id;
+        $this->classAId = $classA->id;
+        $this->classBId = $classB->id;
         $this->examMathId = $examMath->id;
         $this->examIndoId = $examIndo->id;
         $this->scheduleMathId = $scheduleMath->id;
@@ -345,6 +353,72 @@ class TeacherExamDataScopeTest extends TestCase
     {
         $this->actingAs($this->guruA, 'sanctum');
         $this->getJson("/api/teacher/exams/{$this->examIndoId}")->assertStatus(404);
+    }
+
+    private function createExam(?int $classId, ?int $academicYearId, int $subjectId): Exam
+    {
+        return Exam::create([
+            'subject_id' => $subjectId,
+            'class_id' => $classId,
+            'academic_year_id' => $academicYearId,
+            'title' => 'Ujian LPS ' . uniqid(),
+            'duration_minutes' => 60,
+            'status' => 'published',
+        ]);
+    }
+
+    public function test_case_k_class_scoped_exam_matching_full_assignment_triple_is_allowed(): void
+    {
+        $exam = $this->createExam($this->classAId, $this->yearId, $this->mathId);
+
+        $this->actingAs($this->guruA, 'sanctum');
+        $this->getJson("/api/teacher/exams/{$exam->id}")->assertOk();
+    }
+
+    public function test_case_l_class_scoped_exam_of_unassigned_class_is_denied(): void
+    {
+        $exam = $this->createExam($this->classBId, $this->yearId, $this->mathId);
+
+        $this->actingAs($this->guruA, 'sanctum');
+        $this->getJson("/api/teacher/exams/{$exam->id}")->assertStatus(404);
+    }
+
+    public function test_case_m_class_scoped_exam_allowed_when_teacher_holds_that_class_assignment(): void
+    {
+        $exam = $this->createExam($this->classBId, $this->yearId, $this->indoId);
+
+        $this->actingAs($this->guruB, 'sanctum');
+        $this->getJson("/api/teacher/exams/{$exam->id}")->assertOk();
+
+        $this->actingAs($this->guruA, 'sanctum');
+        $this->getJson("/api/teacher/exams/{$exam->id}")->assertStatus(404);
+    }
+
+    public function test_case_n_classless_exam_keeps_subject_only_scope(): void
+    {
+        $exam = $this->createExam(null, null, $this->mathId);
+
+        $this->actingAs($this->guruA, 'sanctum');
+        $this->getJson("/api/teacher/exams/{$exam->id}")->assertOk();
+    }
+
+    public function test_case_o_classless_exam_with_academic_year_keeps_subject_only_scope(): void
+    {
+        $exam = $this->createExam(null, $this->yearId, $this->mathId);
+
+        $this->actingAs($this->guruA, 'sanctum');
+        $this->getJson("/api/teacher/exams/{$exam->id}")->assertOk();
+    }
+
+    public function test_case_p_admin_global_access_to_class_scoped_exam_unchanged(): void
+    {
+        $exam = $this->createExam($this->classAId, $this->yearId, $this->mathId);
+
+        $this->actingAs($this->admin, 'sanctum');
+        $this->getJson("/api/exams/{$exam->id}")->assertOk();
+
+        $ids = collect($this->getJson('/api/exams')->json('data'))->pluck('id')->all();
+        $this->assertContains($exam->id, $ids);
     }
 
     private function seedDummyUser(): void

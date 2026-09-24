@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Examination;
 
 use App\Http\Controllers\Controller;
 use App\Models\Examination\Exam;
-use App\Models\Staff\TeacherAssignment;
 use App\Services\Examination\ExamReportingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +12,8 @@ use Illuminate\Http\Request;
  * Read-only Examination reporting (Phase B15).
  *
  * Admin access follows the existing `manage-exams` administrative pattern;
- * teacher access is restricted to the teacher's subject scope (TeacherAssignment),
+ * teacher access is restricted to the teacher's scope (Exam::scopeTeacherAccessible:
+ * classless = subject-only, class-scoped = matching TeacherAssignment triple),
  * mirroring the other teacher examination controllers (out-of-scope -> 404).
  * Reporting never mutates examination data.
  */
@@ -24,12 +24,7 @@ class ExamReportController extends Controller
         $teacher = $request->user()?->teacherProfile;
 
         if ($teacher) {
-            $subjectIds = TeacherAssignment::where('teacher_id', $teacher->id)
-                ->pluck('subject_id')
-                ->unique()
-                ->all();
-
-            if (! in_array((int) $exam->subject_id, $subjectIds, true)) {
+            if (! $exam->accessibleByTeacher($teacher->id)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Exam report not found.',

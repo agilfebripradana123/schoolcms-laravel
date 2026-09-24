@@ -7,7 +7,6 @@ use App\Http\Requests\Api\Teachers\StoreEssayGradeRequest;
 use App\Models\Examination\ExamAnswer;
 use App\Models\Examination\ExamAttempt;
 use App\Models\Examination\ExamAttemptQuestion;
-use App\Models\Staff\TeacherAssignment;
 use App\Services\Examination\ExamGradeIntegrationService;
 use App\Services\Examination\ExamScoringService;
 use Illuminate\Http\JsonResponse;
@@ -18,7 +17,8 @@ use Illuminate\Http\Request;
  *
  * Scope is derived server-side, exactly like the other teacher examination
  * controllers: authenticated user -> teacherProfile -> teacher.id ->
- * TeacherAssignment.subject_id -> attempt.exam.subject_id. A teacher can only
+ * TeacherAssignment via Exam::scopeTeacherAccessible (classless = subject-only,
+ * class-scoped = full TeacherAssignment triple). A teacher can only
  * view/grade essay answers of attempts belonging to exams in their teaching
  * scope; anything else is 404 (no IDOR, no enumeration).
  *
@@ -36,11 +36,9 @@ class TeacherExamGradingController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $attemptModel = ExamAttempt::with(['exam', 'participant.student', 'attemptQuestions'])
             ->where('id', $attempt)
-            ->whereHas('exam', fn ($q) => $q->whereIn('subject_id', $subjectIds))
+            ->whereHas('exam', fn ($q) => $q->teacherAccessible($teacher->id))
             ->first();
 
         if (! $attemptModel) {
@@ -94,8 +92,6 @@ class TeacherExamGradingController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $answer = ExamAnswer::with(['attempt.exam', 'attemptQuestion'])
             ->where('id', $examAnswer)
             ->first();
@@ -107,7 +103,7 @@ class TeacherExamGradingController extends Controller
         $attempt = $answer->attempt;
         $question = $answer->attemptQuestion;
 
-        if (! $attempt || ! in_array($attempt->exam->subject_id, $subjectIds, true)) {
+        if (! $attempt || ! $attempt->exam->accessibleByTeacher($teacher->id)) {
             return $this->notFound('Exam answer not found.');
         }
 
@@ -266,11 +262,9 @@ class TeacherExamGradingController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-
         $resultRow = \App\Models\Examination\ExamResult::with(['participant'])
             ->where('id', $result)
-            ->whereHas('participant.exam', fn ($q) => $q->whereIn('subject_id', $subjectIds))
+            ->whereHas('participant.exam', fn ($q) => $q->teacherAccessible($teacher->id))
             ->first();
 
         if (! $resultRow) {
@@ -307,14 +301,6 @@ class TeacherExamGradingController extends Controller
     private function teacher(Request $request)
     {
         return $request->user()?->teacherProfile;
-    }
-
-    private function subjectIds(int $teacherId): array
-    {
-        return TeacherAssignment::where('teacher_id', $teacherId)
-            ->pluck('subject_id')
-            ->unique()
-            ->all();
     }
 
     private function forbidden(): JsonResponse

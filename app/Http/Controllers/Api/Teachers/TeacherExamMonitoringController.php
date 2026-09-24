@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\Examination\ExamAttemptMonitoringResource;
 use App\Models\Examination\Exam;
 use App\Models\Examination\ExamAttempt;
-use App\Models\Staff\TeacherAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -17,17 +16,9 @@ class TeacherExamMonitoringController extends Controller
         return $request->user()?->teacherProfile;
     }
 
-    private function subjectIds(int $teacherId): array
+    private function examIds(int $teacherId): array
     {
-        return TeacherAssignment::where('teacher_id', $teacherId)
-            ->pluck('subject_id')
-            ->unique()
-            ->all();
-    }
-
-    private function examIds(array $subjectIds): array
-    {
-        return Exam::whereIn('subject_id', $subjectIds)
+        return Exam::teacherAccessible($teacherId)
             ->pluck('id')
             ->all();
     }
@@ -58,8 +49,7 @@ class TeacherExamMonitoringController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-        $examIds = $this->examIds($subjectIds);
+        $examIds = $this->examIds($teacher->id);
 
         $query = ExamAttempt::with([
             'exam.subject',
@@ -108,8 +98,7 @@ class TeacherExamMonitoringController extends Controller
             return $this->forbidden();
         }
 
-        $subjectIds = $this->subjectIds($teacher->id);
-        $examIds = $this->examIds($subjectIds);
+        $examIds = $this->examIds($teacher->id);
 
         $attempt = ExamAttempt::with([
             'exam.subject',
