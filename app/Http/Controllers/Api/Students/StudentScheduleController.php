@@ -9,24 +9,32 @@ use Illuminate\Http\Request;
 
 class StudentScheduleController extends Controller
 {
+    /**
+     * GET /api/student/schedules
+     *
+     * Schedule scope is the authenticated student's authoritative class
+     * enrollment (class_students.status = active), matched on BOTH class_id
+     * and academic_year_id. The legacy nullable `students.class_id` column is
+     * NOT used as a schedule source. Semester is intentionally not used as a
+     * filter because class_students is year-scoped only.
+     */
     public function index(Request $request): JsonResponse
     {
         $student = $request->attributes->get('student_profile');
-
-        if (!$student->class_id) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Student has no class assigned',
-                'data' => [],
-            ]);
-        }
 
         $validated = $request->validate([
             'day' => 'nullable|string',
         ]);
 
         $query = Schedule::with(['schoolClass', 'subject', 'teacher', 'period'])
-            ->where('class_id', $student->class_id);
+            ->whereExists(function ($enrollment) use ($student) {
+                $enrollment->select('class_students.id')
+                    ->from('class_students')
+                    ->whereColumn('class_students.class_id', 'schedules.class_id')
+                    ->whereColumn('class_students.academic_year_id', 'schedules.academic_year_id')
+                    ->where('class_students.student_id', $student->id)
+                    ->where('class_students.status', 'active');
+            });
 
         if (!empty($validated['day'])) {
             $query->where('day', $validated['day']);
