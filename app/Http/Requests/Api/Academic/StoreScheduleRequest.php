@@ -16,7 +16,7 @@ class StoreScheduleRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
+        $rules = [
             'class_id' => [
                 'required',
                 'integer',
@@ -55,6 +55,17 @@ class StoreScheduleRequest extends FormRequest
                 }),
             ],
         ];
+
+        if ($this->input('semester_id') !== null) {
+            $rules['class_id'][] = Rule::unique('schedules', 'class_id')->where(function ($query) {
+                $query->where('day', $this->input('day'))
+                    ->where('period_id', $this->input('period_id'))
+                    ->where('academic_year_id', $this->input('academic_year_id'))
+                    ->where('semester_id', $this->input('semester_id'));
+            });
+        }
+
+        return $rules;
     }
 
     protected function failedValidation(Validator $validator): void
